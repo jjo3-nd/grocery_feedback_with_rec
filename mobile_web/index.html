@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>HEI Recommendations</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="hero">
+      <div class="hero__content">
+        <p class="eyebrow">HEI Optimizer</p>
+        <h1>Original products and healthier swaps</h1>
+        <p class="subhead">
+          Upload your <span class="mono">recommended_diet.csv</span> and browse the
+          original items next to their recommended replacements.
+        </p>
+      </div>
+    </header>
+
+    <main class="shell">
+      <section class="panel">
+        <div class="panel__head">
+          <h2>Upload a cart</h2>
+          <p class="muted">Upload a CSV like <span class="mono">dummy_data.csv</span>.</p>
+        </div>
+        <div class="uploader" id="dropZone">
+          <input type="file" id="fileInput" accept=".csv" />
+          <div>
+            <p class="uploader__title">Drop cart CSV here or tap to choose</p>
+            <p class="muted">Runs the HEI optimizer and returns recommendations.</p>
+          </div>
+        </div>
+        <div class="category-panel" id="categoryPanel" hidden>
+          <h3>Choose recommendation categories</h3>
+          <p class="muted">Pick the category value for each item (derived from Walmart data).</p>
+          <div id="categoryList" class="category-list"></div>
+          <div class="run-actions">
+            <button class="run-btn" id="runBtn">Run recommendations</button>
+            <button class="run-btn run-btn--ghost" id="runRecipeBtn">Run with recipe</button>
+          </div>
+          <div class="status" id="status"></div>
+        </div>
+        <div class="controls">
+          <input id="searchInput" type="search" placeholder="Search products" />
+        </div>
+        <div class="summary" id="summary" hidden>
+          <div>
+            <p class="summary__label">Original score</p>
+            <p class="summary__value" id="originalScore">-</p>
+          </div>
+          <div>
+            <p class="summary__label">Recommended score</p>
+            <p class="summary__value" id="recommendedScore">-</p>
+          </div>
+          <a id="downloadLink" class="download" href="#" download="recommended_diet.csv">Download CSV</a>
+        </div>
+        <div class="components" id="components" hidden></div>
+        <div class="recipe" id="recipe" hidden>
+          <h3>Recipe</h3>
+          <div class="recipe__section">
+            <p class="recipe__label">Name</p>
+            <p id="recipeName" class="recipe__text"></p>
+          </div>
+          <div class="recipe__section">
+            <p class="recipe__label">Instructions</p>
+            <p id="recipeInstructions" class="recipe__text"></p>
+          </div>
+          <div class="recipe__section">
+            <p class="recipe__label">Missing ingredients</p>
+            <ul id="recipeIngredients" class="recipe__list"></ul>
+          </div>
+        </div>
+      </section>
+
+      <section class="results" id="results"></section>
+    </main>
+
+    <footer class="footer">
+      <p>Built for quick mobile browsing of HEI recommendations.</p>
+    </footer>
+
+    <script src="app.js"></script>
+  </body>
+</html>
