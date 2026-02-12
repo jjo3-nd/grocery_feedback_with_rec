@@ -12,11 +12,9 @@ source .venv/bin/activate
 # 2) Install dependencies
 pip install -r mobile_web/requirements.txt
 
-# 3) Set required environment variables
-export FOOD_POOL_PATH="/path/to/walmart_hei_2020.csv"
-
-# Optional (for recipe + missing ingredients)
-export OPENAI_API_KEY="your_openai_key"
+# 3) (Optional) create a .env file in the repo root
+# FOOD_POOL_PATH=./data/walmart_hei_2020.csv
+# OPENAI_API_KEY=your_openai_key
 
 # 4) Run the server
 python mobile_web/server.py
@@ -26,6 +24,13 @@ Open the app at:
 ```
 http://localhost:5000
 ```
+
+## Sample data included
+
+- `data/dummy_data2.csv` (example cart upload)
+- `data/walmart_hei_2020.csv` (food pool, ~35MB)
+
+If you don't set `FOOD_POOL_PATH`, the server defaults to `data/walmart_hei_2020.csv` when it exists.
 
 ## Data requirements
 
@@ -46,6 +51,11 @@ Optional (if you have them):
 - `Product Size Units`
 - `Walmart Item ID`
 
+Example header (from `data/dummy_data2.csv`):
+```
+Product Name,Walmart Item ID,Product Size Values,Product Size Units,Price,Food Code,Serving Size,Amount
+```
+
 If any HEI nutrient columns are missing, the server attempts to enrich the cart rows by matching `Product Name` with the food pool.
 
 ## How it works
@@ -59,7 +69,7 @@ If any HEI nutrient columns are missing, the server attempts to enrich the cart 
 
 ## Environment variables
 
-- `FOOD_POOL_PATH` (required): absolute path to `walmart_hei_2020.csv`
+- `FOOD_POOL_PATH` (optional): absolute path to `walmart_hei_2020.csv`
 - `OPENAI_API_KEY` (optional): required for **Run with recipe**
 - `NITER_DEFAULT` (optional): simulated annealing iterations (default 1000)
 

@@ -1,4 +1,5 @@
 import os
+from dotenv import load_dotenv
 import pandas as pd
 import numpy as np
 import math
@@ -7,6 +8,7 @@ from openai import OpenAI
 import json
 from pydantic import BaseModel
 
+load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
 def hei_2020(kcal=0, vtotalleg=0, vdrkgrleg=0, f_total=0, fwholefrt=0, g_whole=0, d_total=0, pfallprotleg=0, pfseaplantleg=0, monopoly=0, satfat=0, sodium=0, g_refined=0, add_sugars=0):

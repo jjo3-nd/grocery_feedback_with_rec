@@ -7,18 +7,22 @@ import sys
 from pathlib import Path
 
 from flask import Flask, jsonify, request, send_from_directory
+from dotenv import load_dotenv
 from werkzeug.exceptions import HTTPException
 import pandas as pd
 
 # Allow importing Python.py from repo root
 REPO_ROOT = Path(__file__).resolve().parents[1]
+load_dotenv(REPO_ROOT / ".env")
 sys.path.append(str(REPO_ROOT))
 
 import Python as python_module
 from Python import simulated_annealing_fixed_amount
 
 APP_DIR = Path(__file__).resolve().parent
-FOOD_POOL_PATH = os.getenv("FOOD_POOL_PATH", "/Users/jeongwon/Downloads/walmart_hei_2020.csv")
+default_pool = REPO_ROOT / "data" / "walmart_hei_2020.csv"
+default_pool_path = str(default_pool) if default_pool.exists() else "/Users/jeongwon/Downloads/walmart_hei_2020.csv"
+FOOD_POOL_PATH = os.getenv("FOOD_POOL_PATH", default_pool_path)
 NITER_DEFAULT = int(os.getenv("NITER_DEFAULT", "1000"))
 
 app = Flask(__name__, static_folder=str(APP_DIR), static_url_path="")

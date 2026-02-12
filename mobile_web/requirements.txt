@@ -3,3 +3,4 @@ numpy
 openai
 pandas
 pydantic
+python-dotenv
