@@ -17,7 +17,7 @@ load_dotenv(REPO_ROOT / ".env")
 sys.path.append(str(REPO_ROOT))
 
 import Python as python_module
-from Python import simulated_annealing_fixed_amount
+from Python import simulated_annealing_fixed_amount, calculate_hei_scores_wrapper, extract_hei_components
 
 APP_DIR = Path(__file__).resolve().parent
 default_pool = REPO_ROOT / "data" / "walmart_hei_2020.csv"
@@ -34,10 +34,11 @@ HIERARCHY_COLUMNS = [
     "wweia_food_category_description",
     "FOODCODE",
     "Level_1_Category",
+    "Keyword",
 ]
 
 DISPLAY_ORDER = [
-    "DESCRIPTION",
+    "Keyword",
     "wweia_food_category_description",
     "Level_2_Category",
     "Level_1_Category",
@@ -45,7 +46,7 @@ DISPLAY_ORDER = [
 
 DEFAULT_PRIORITY = [
     "wweia_food_category_description",
-    "DESCRIPTION",
+    "Keyword",
     "Level_2_Category",
     "Level_1_Category",
 ]
@@ -88,35 +89,23 @@ def attach_images(df: pd.DataFrame) -> pd.DataFrame:
 
 def select_default_for_product(product_name: str, matches: pd.DataFrame) -> dict | None:
     for key in DEFAULT_PRIORITY:
-        if key == "DESCRIPTION":
-            if "FOODCODE" in matches.columns and "DESCRIPTION" in matches.columns:
-                subset = matches[["FOODCODE", "DESCRIPTION"]].dropna()
-                if not subset.empty:
-                    row = subset.iloc[0]
-                    return {
-                        "column": "FOODCODE",
-                        "value": str(row["FOODCODE"]).strip(),
-                        "description": str(row["DESCRIPTION"]).strip(),
-                        "label": str(row["DESCRIPTION"]).strip(),
-                    }
-        else:
-            if key in matches.columns:
-                value = (
-                    matches[key]
-                    .dropna()
-                    .astype(str)
-                    .str.strip()
-                    .replace("", pd.NA)
-                    .dropna()
-                    .head(1)
-                )
-                if not value.empty:
-                    return {
-                        "column": key,
-                        "value": value.iloc[0],
-                        "description": "",
-                        "label": value.iloc[0],
-                    }
+        if key in matches.columns:
+            value = (
+                matches[key]
+                .dropna()
+                .astype(str)
+                .str.strip()
+                .replace("", pd.NA)
+                .dropna()
+                .head(1)
+            )
+            if not value.empty:
+                return {
+                    "column": key,
+                    "value": value.iloc[0],
+                    "description": "",
+                    "label": value.iloc[0],
+                }
     return None
 
 
@@ -136,25 +125,6 @@ def get_first_value(matches: pd.DataFrame, col: str) -> str | None:
     return values.iloc[0]
 
 
-def get_first_description_pair(matches: pd.DataFrame) -> dict | None:
-    if "FOODCODE" not in matches.columns or "DESCRIPTION" not in matches.columns:
-        return None
-    subset = matches[["FOODCODE", "DESCRIPTION"]].dropna()
-    subset = subset[
-        (subset["FOODCODE"].astype(str).str.len() > 0)
-        & (subset["DESCRIPTION"].astype(str).str.len() > 0)
-    ]
-    if subset.empty:
-        return None
-    row = subset.iloc[0]
-    return {
-        "label": str(row["DESCRIPTION"]).strip(),
-        "column": "FOODCODE",
-        "value": str(row["FOODCODE"]).strip(),
-        "description": str(row["DESCRIPTION"]).strip(),
-    }
-
-
 def build_category_options(diet_df: pd.DataFrame, food_pool: pd.DataFrame) -> list[dict]:
     options_payload = []
     pool_names = food_pool["Product Name"].astype(str) if "Product Name" in food_pool.columns else pd.Series([], dtype=str)
@@ -166,32 +136,28 @@ def build_category_options(diet_df: pd.DataFrame, food_pool: pd.DataFrame) -> li
                 {
                     "index": int(idx),
                     "product_name": "",
-                    "options": [],
-                    "default": None,
+                    "values": {},
+                    "default_index": 0,
                 }
             )
             continue
 
         matches = food_pool[pool_names.str.contains(product_name, case=False, na=False, regex=False)]
-        options = []
+        values = {}
         for col in DISPLAY_ORDER:
-            if col == "DESCRIPTION":
-                pair = get_first_description_pair(matches)
-                if pair:
-                    options.append(pair)
-            else:
-                value = get_first_value(matches, col)
-                if value:
-                    options.append({"label": value, "column": col, "value": value})
+            values[col] = get_first_value(matches, col) or ""
 
         default_choice = select_default_for_product(product_name, matches)
+        default_index = 0
+        if default_choice and default_choice.get("column") in DISPLAY_ORDER:
+            default_index = DISPLAY_ORDER.index(default_choice["column"])
 
         options_payload.append(
             {
                 "index": int(idx),
                 "product_name": product_name,
-                "options": options,
-                "default": default_choice,
+                "values": values,
+                "default_index": default_index,
             }
         )
 
@@ -218,15 +184,10 @@ def ensure_recommendation_hierarchy(diet_df: pd.DataFrame, food_pool: pd.DataFra
             continue
         column = default_choice["column"]
         value = default_choice["value"]
-        description = default_choice.get("description", "")
         if column not in diet_df.columns:
             diet_df[column] = ""
         diet_df.at[idx, column] = value
         diet_df.at[idx, "Recommendation_Hierarchy"] = column
-        if column == "FOODCODE" and description:
-            if "DESCRIPTION" not in diet_df.columns:
-                diet_df["DESCRIPTION"] = ""
-            diet_df.at[idx, "DESCRIPTION"] = description
     return diet_df
 
 
@@ -235,7 +196,32 @@ def enrich_diet_with_pool(diet_df: pd.DataFrame, food_pool: pd.DataFrame) -> pd.
         return diet_df
 
     pool = food_pool.drop_duplicates(subset=["Product Name"]).copy()
-    merged = diet_df.merge(pool, on="Product Name", how="left", suffixes=("", "_pool"))
+    merged = diet_df.copy()
+
+    def normalize_foodcode(series: pd.Series) -> pd.Series:
+        norm = series.astype(str).str.strip()
+        norm = norm.str.replace(r"\.0$", "", regex=True)
+        norm = norm.replace({"nan": pd.NA, "None": pd.NA, "": pd.NA})
+        return norm
+
+    diet_food_code_col = None
+    for candidate in ["FOODCODE", "Food Code", "FoodCode"]:
+        if candidate in merged.columns:
+            diet_food_code_col = candidate
+            break
+
+    pool_food_code_col = "FOODCODE" if "FOODCODE" in pool.columns else None
+
+    if diet_food_code_col and pool_food_code_col:
+        diet_codes = normalize_foodcode(merged[diet_food_code_col])
+        pool_codes = normalize_foodcode(pool[pool_food_code_col])
+        merged["_foodcode_key"] = diet_codes
+        pool["_foodcode_key"] = pool_codes
+
+        merged = merged.merge(pool, on="_foodcode_key", how="left", suffixes=("", "_pool"))
+        merged.drop(columns=["_foodcode_key"], inplace=True, errors="ignore")
+    else:
+        merged = merged.merge(pool, on="Product Name", how="left", suffixes=("", "_pool"))
 
     pool_cols = [c for c in pool.columns if c != "Product Name"]
     for col in pool_cols:
@@ -248,12 +234,10 @@ def enrich_diet_with_pool(diet_df: pd.DataFrame, food_pool: pd.DataFrame) -> pd.
             merged[col] = merged[pool_col]
         merged.drop(columns=[pool_col], inplace=True)
 
-    # Remove any remaining pool columns
     extra_cols = [c for c in merged.columns if c.endswith("_pool")]
     if extra_cols:
         merged.drop(columns=extra_cols, inplace=True)
 
-    # Fallback contains-match for rows with no pool data
     rep_col = None
     for candidate in ["Energy", "KCAL", "Calories"]:
         if candidate in pool_cols:
@@ -277,6 +261,25 @@ def enrich_diet_with_pool(diet_df: pd.DataFrame, food_pool: pd.DataFrame) -> pd.
                         merged.at[idx, col] = match_row[col]
 
     return merged
+
+
+def row_components(row_df: pd.DataFrame) -> dict:
+    scores = calculate_hei_scores_wrapper(row_df)
+    return extract_hei_components(scores)
+
+
+def compute_swap_totals_components(
+    base_df: pd.DataFrame, replace_row: pd.Series, idx: int
+) -> tuple[float, float, dict]:
+    temp = base_df.copy()
+    for col in base_df.columns:
+        if col in replace_row.index:
+            temp.at[idx, col] = replace_row[col]
+    total_cost = temp["Price"].sum() if "Price" in temp.columns else 0.0
+    scores = calculate_hei_scores_wrapper(temp)
+    components = extract_hei_components(scores)
+    total_score = components.get("HEI2015_TOTAL_SCORE", scores[-1] if len(scores) else 0)
+    return total_cost, total_score, components
 
 
 @app.get("/")
@@ -318,17 +321,12 @@ def recommend():
             idx = int(override.get("index"))
             column = str(override.get("column", "")).strip()
             value = str(override.get("value", "")).strip()
-            description = str(override.get("description", "")).strip()
             if not column or not value:
                 continue
             if column not in diet_df.columns:
                 diet_df[column] = ""
             diet_df.at[idx, column] = value
             diet_df.at[idx, "Recommendation_Hierarchy"] = column
-            if column == "FOODCODE" and description:
-                if "DESCRIPTION" not in diet_df.columns:
-                    diet_df["DESCRIPTION"] = ""
-                diet_df.at[idx, "DESCRIPTION"] = description
 
     niter = request.form.get("niter", str(NITER_DEFAULT))
     try:
@@ -341,33 +339,110 @@ def recommend():
     if not openai_key:
         openai_key = getattr(python_module, "OPENAI_API_KEY", "")
 
-    diet_df = enrich_diet_with_pool(diet_df, food_pool)
-    diet_df = ensure_recommendation_hierarchy(diet_df, food_pool)
-
     if use_openai and not openai_key:
         return jsonify({"error": "OPENAI_API_KEY is not set."}), 400
 
-    result = simulated_annealing_fixed_amount(
+    diet_df = enrich_diet_with_pool(diet_df, food_pool)
+    diet_df = ensure_recommendation_hierarchy(diet_df, food_pool)
+
+    bundles = python_module.get_all_three_bundles(
         diet_df,
         food_pool,
         niter=niter,
         use_openai=use_openai,
         openai_api_key=openai_key,
     )
-    best_table = attach_images(result["best_diet_table"])
+
+    def prep_full(bundle):
+        df = bundle["best_diet_full"].copy()
+        df = df.iloc[: len(diet_df)].reset_index(drop=True)
+        return df
+
+    health_full = prep_full(bundles["healthiest"])
+    cheap_full = prep_full(bundles["cheapest"])
+    balanced_full = prep_full(bundles["balanced"])
+
+    base_cost = diet_df["Price"].sum() if "Price" in diet_df.columns else 0.0
+    base_components = extract_hei_components(calculate_hei_scores_wrapper(diet_df))
+    base_score = base_components.get("HEI2015_TOTAL_SCORE", 0)
+
+    rows = []
+    for idx in range(len(diet_df)):
+        orig_row = diet_df.iloc[idx]
+        orig_name = str(orig_row.get("Product Name", ""))
+        orig_price = float(orig_row.get("Price", 0.0)) if "Price" in diet_df.columns else 0.0
+        orig_image = _image_url_map.get(orig_name, "")
+        orig_components = row_components(orig_row.to_frame().T)
+
+        def build_option(option_row: pd.Series):
+            name = str(option_row.get("Product Name", ""))
+            price = float(option_row.get("Price", 0.0)) if "Price" in option_row.index else 0.0
+            image = _image_url_map.get(name, "")
+            components = row_components(option_row.to_frame().T)
+            total_cost, total_score, total_components = compute_swap_totals_components(diet_df, option_row, idx)
+            return {
+                "name": name,
+                "price": price,
+                "image": image,
+                "components": components,
+                "hei": components.get("HEI2015_TOTAL_SCORE", 0),
+                "total_cost_after": total_cost,
+                "total_score_after": total_score,
+                "total_components_after": total_components,
+            }
+
+        target_column = orig_row.get("Recommendation_Hierarchy", "")
+        target_value = orig_row.get(target_column, "") if target_column in orig_row else ""
+
+        row_data = {
+            "target_category": target_value,
+            "target_category_column": target_column,
+            "original": {
+                "name": orig_name,
+                "price": orig_price,
+                "image": orig_image,
+                "components": orig_components,
+                "hei": orig_components.get("HEI2015_TOTAL_SCORE", 0),
+            },
+            "options": {
+                "healthiest": build_option(health_full.iloc[idx]),
+                "cheapest": build_option(cheap_full.iloc[idx]),
+                "balanced": build_option(balanced_full.iloc[idx]),
+            },
+        }
+        rows.append(row_data)
 
     csv_buffer = io.StringIO()
-    best_table.to_csv(csv_buffer, index=False)
+    pd.DataFrame(
+        {
+            "Original_Food": [r["original"]["name"] for r in rows],
+            "Original_Price": [r["original"]["price"] for r in rows],
+            "Target_Category": [r["target_category"] for r in rows],
+            "Target_Category_Column": [r.get("target_category_column", "") for r in rows],
+            "Healthiest_Food": [r["options"]["healthiest"]["name"] for r in rows],
+            "Healthiest_Price": [r["options"]["healthiest"]["price"] for r in rows],
+            "Cheapest_Food": [r["options"]["cheapest"]["name"] for r in rows],
+            "Cheapest_Price": [r["options"]["cheapest"]["price"] for r in rows],
+            "Balanced_Food": [r["options"]["balanced"]["name"] for r in rows],
+            "Balanced_Price": [r["options"]["balanced"]["price"] for r in rows],
+        }
+    ).to_csv(csv_buffer, index=False)
 
     return jsonify(
         {
-            "original_score": result["original_score"],
-            "recommended_score": result["recommended_score"],
-            "original_components": result.get("original_components", {}),
-            "recommended_components": result.get("recommended_components", {}),
-            "recipe_info": result.get("recipe_info"),
-            "recipe_data": result.get("recipe_data"),
-            "rows": best_table.to_dict(orient="records"),
+            "summary": {
+                "original_score": base_score,
+                "original_cost": base_cost,
+                "healthiest_score": bundles["healthiest"].get("recommended_score"),
+                "cheapest_cost": bundles["cheapest"].get("recommended_cost"),
+                "balanced_score": bundles["balanced"].get("recommended_score"),
+            },
+            "base_components": base_components,
+            "original_components": bundles["healthiest"].get("original_components", {}),
+            "recommended_components": bundles["healthiest"].get("recommended_components", {}),
+            "recipe_info": bundles["healthiest"].get("recipe_info"),
+            "recipe_data": bundles["healthiest"].get("recipe_data"),
+            "rows": rows,
             "csv": csv_buffer.getvalue(),
         }
     )

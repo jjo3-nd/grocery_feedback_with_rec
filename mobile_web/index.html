@@ -7,6 +7,14 @@
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
+    <nav class="top-nav">
+      <div class="top-nav__brand">HEI Optimizer</div>
+      <div class="top-nav__tabs">
+        <button class="top-nav__tab is-active" data-view="list">All items</button>
+        <button class="top-nav__tab" data-view="focus">Focus mode</button>
+      </div>
+    </nav>
+
     <header class="hero">
       <div class="hero__content">
         <p class="eyebrow">HEI Optimizer</p>
@@ -46,12 +54,20 @@
         </div>
         <div class="summary" id="summary" hidden>
           <div>
-            <p class="summary__label">Original score</p>
+            <p class="summary__label">Original HEI</p>
             <p class="summary__value" id="originalScore">-</p>
           </div>
           <div>
-            <p class="summary__label">Recommended score</p>
-            <p class="summary__value" id="recommendedScore">-</p>
+            <p class="summary__label">Healthiest HEI</p>
+            <p class="summary__value" id="healthiestScore">-</p>
+          </div>
+          <div>
+            <p class="summary__label">Cheapest total</p>
+            <p class="summary__value" id="cheapestCost">-</p>
+          </div>
+          <div>
+            <p class="summary__label">Balanced HEI</p>
+            <p class="summary__value" id="balancedScore">-</p>
           </div>
           <a id="downloadLink" class="download" href="#" download="recommended_diet.csv">Download CSV</a>
         </div>
@@ -74,11 +90,37 @@
       </section>
 
       <section class="results" id="results"></section>
+
+      <section class="focus" id="focusView" hidden>
+        <div class="focus__header">
+          <div>
+            <div class="focus__title" id="focusTitle">Reviewing</div>
+            <div class="focus__subtitle" id="focusSubtitle">Item 1 of 1</div>
+          </div>
+          <div class="focus__progress" id="focusProgress">0%</div>
+        </div>
+        <div class="focus__body" id="focusBody"></div>
+      </section>
     </main>
 
     <footer class="footer">
       <p>Built for quick mobile browsing of HEI recommendations.</p>
     </footer>
+
+    <div class="sticky" id="sticky" hidden>
+      <div>
+        <p class="sticky__label">Cost</p>
+        <div class="sticky__value" id="stickyCost">-</div>
+        <div class="sticky__delta" id="stickyCostDelta"></div>
+      </div>
+      <div>
+        <p class="sticky__label">Total HEI Score</p>
+        <div class="sticky__value" id="stickyHealth">-</div>
+        <div class="sticky__delta" id="stickyHealthDelta"></div>
+      </div>
+      <div class="sticky__components" id="stickyComponents"></div>
+      <div class="sticky__note" id="stickyNote">Live impact</div>
+    </div>
 
     <script src="app.js"></script>
   </body>

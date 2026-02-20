@@ -271,7 +271,7 @@ def get_recipe_and_ingredients_from_gpt(current_items_list, valid_categories, ap
         response = client.chat.completions.create(
             model="gpt-4o-2024-08-06", 
             messages=[
-                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "system", "content": "You are a helpful nutrition assistant."},
                 {"role": "user", "content": prompt}
             ],
             # 3. Apply Structured Outputs
@@ -339,7 +339,29 @@ def find_best_match_in_pool(ingredient_info, food_pool, current_diet):
 # ==============================================================================
 # 2. Simulated Annealing
 # ==============================================================================
-def simulated_annealing_fixed_amount(diet_df, food_pool_df, target_hiearchy_level_defined = "", niter=1000, temp0=500, use_openai=False, openai_api_key=""):
+def simulated_annealing_fixed_amount(diet_df, food_pool_df, optimization_mode='health', target_hiearchy_level_defined = "", niter=1000, temp0=500, use_openai=False, openai_api_key=""):
+    # --- Helper to Calculate Objective Function ---
+    def get_objective_score(current_diet_df, mode):
+        # 1. Base HEI Score
+        scores_tuple = calculate_hei_scores_wrapper(current_diet_df)
+        hei_score = scores_tuple[-1]
+        
+        # 2. Total Cost (Ensure 'Price' column exists)
+        total_cost = current_diet_df['Price'].sum() if 'Price' in current_diet_df else 0.0
+        
+        if mode == 'health':
+            return hei_score
+        elif mode == 'price':
+            # Maximize negative cost (Minimize cost)
+            return -total_cost
+        elif mode == 'balanced':
+            # Weighted Score: HEI - (Alpha * Cost)
+            # Alpha = 0.5 assumes saving $2 is worth 1 HEI point
+            alpha = 0.5 
+            return hei_score - (alpha * total_cost)
+        else:
+            return hei_score
+    
     if len(target_hiearchy_level_defined) != 0: 
         if target_hiearchy_level_defined == 'FOODCODE':
              original_target_category = diet_df['DESCRIPTION']
@@ -386,14 +408,17 @@ def simulated_annealing_fixed_amount(diet_df, food_pool_df, target_hiearchy_leve
                     'Original_Product_Size_Values', 'Original_Product_Size_Units', 'Original_Price']
     target_cols = [c for c in common_cols if c not in exclude_cols] 
 
-    current_scores_tuple = calculate_hei_scores_wrapper(current_diet)
-    current_score = current_scores_tuple[-1]
-    print(f"Initial Score: {current_score:.4f}")
+    # --- Initialize Objective Scores ---
+    current_obj_val = get_objective_score(current_diet, optimization_mode)
+    best_obj_val = current_obj_val
+
+    # Track actual HEI separately for history/reporting
+    current_hei = calculate_hei_scores_wrapper(current_diet)[-1]
+    scores_history = [current_hei]
+    
     
     best_diet = current_diet.copy(deep=True)
-    best_score = current_score
-    scores_history = [current_score]
-
+    best_hei_score = current_hei
 
     # # Phase 1: Optimize Existing Items (Simulated Annealing)
     k = 1
@@ -485,9 +510,9 @@ def simulated_annealing_fixed_amount(diet_df, food_pool_df, target_hiearchy_leve
                 next_diet.at[idx_to_replace, 'FoodAmt'] = 1.0
             else: pass
 
-        new_score_val = calculate_hei_scores_wrapper(next_diet)[-1]
+        new_obj_val = get_objective_score(next_diet, optimization_mode)
         
-        diff = new_score_val - current_score
+        diff = new_obj_val - current_obj_val
         accept = False
         if diff > 0: accept = True 
         else:
@@ -495,11 +520,16 @@ def simulated_annealing_fixed_amount(diet_df, food_pool_df, target_hiearchy_leve
         
         if accept:
             current_diet = next_diet
-            current_score = new_score_val
-            if current_score > best_score:
-                best_score = current_score
+            current_obj_val = new_obj_val
+            # Keep track of best solution
+            if current_obj_val > best_obj_val:
+                best_obj_val = current_obj_val
                 best_diet = current_diet.copy(deep=True)
-        scores_history.append(current_score)
+                # Store the actual HEI score of the best solution for reporting
+                best_hei_score = calculate_hei_scores_wrapper(best_diet)[-1]
+
+        current_hei = calculate_hei_scores_wrapper(current_diet)[-1]
+        scores_history.append(current_hei)
         k += 1
 
     # Phase 1 Optimization Done. best_diet contains the optimized version of the original cart.
@@ -596,12 +626,19 @@ def simulated_annealing_fixed_amount(diet_df, food_pool_df, target_hiearchy_leve
         
     final_table.fillna("Unknown", inplace=True)
 
-    original_components = extract_hei_components(current_scores_tuple)
+    original_components = extract_hei_components(calculate_hei_scores_wrapper(diet_df))
     recommended_components = extract_hei_components(calculate_hei_scores_wrapper(best_diet))
 
+    # Calculate Total Costs
+    original_cost = diet_df['Price'].sum() if 'Price' in diet_df else 0.0
+    recommended_cost = best_diet['Price'].sum() if 'Price' in best_diet else 0.0
+
     return {
+        "mode": optimization_mode,
         "original_score": scores_history[0],
-        "recommended_score": best_score,
+        "recommended_score": best_hei_score, # Pure HEI Score
+        "original_cost": original_cost,
+        "recommended_cost": recommended_cost,
         "original_components": original_components,
         "recommended_components": recommended_components,
         "iterated_scores": scores_history,
@@ -611,6 +648,41 @@ def simulated_annealing_fixed_amount(diet_df, food_pool_df, target_hiearchy_leve
         "recipe_data": recipe_data_out
     }
 
+
+def get_all_three_bundles(diet_df, food_pool_df, niter=1000, use_openai=False, openai_api_key=""):
+    
+    print("Generating Healthiest Bundle...")
+    health_res = simulated_annealing_fixed_amount(
+        diet_df, food_pool_df, 
+        optimization_mode='health', 
+        niter=niter, 
+        use_openai=use_openai, 
+        openai_api_key=openai_api_key
+    )
+    
+    print("Generating Cheapest Bundle...")
+    # Typically, we don't need OpenAI recipes for the budget bundle, but you can enable if desired
+    cheap_res = simulated_annealing_fixed_amount(
+        diet_df, food_pool_df, 
+        optimization_mode='price', 
+        niter=niter, 
+        use_openai=False 
+    )
+    
+    print("Generating Balanced Bundle...")
+    balanced_res = simulated_annealing_fixed_amount(
+        diet_df, food_pool_df, 
+        optimization_mode='balanced', 
+        niter=niter, 
+        use_openai=use_openai,
+        openai_api_key=openai_api_key
+    )
+    
+    return {
+        "healthiest": health_res,
+        "cheapest": cheap_res,
+        "balanced": balanced_res
+    }
 
 
 def run_recommendation(diet_path, food_pool_path, niter=1000, use_openai=False, openai_api_key=""):
@@ -628,34 +700,105 @@ def run_recommendation(diet_path, food_pool_path, niter=1000, use_openai=False, 
     return result
 
 
+# if __name__ == "__main__":
+#     import argparse
+
+#     parser = argparse.ArgumentParser(description="Generate HEI-optimized recommendations.")
+#     parser.add_argument("--diet", required=True, help="Path to diet CSV (original cart).")
+#     parser.add_argument("--pool", required=True, help="Path to food pool CSV.")
+#     parser.add_argument("--out", default="recommended_diet.csv", help="Output CSV path.")
+#     parser.add_argument("--niter", type=int, default=1000, help="Simulated annealing iterations.")
+#     parser.add_argument("--use-openai", action="store_true", help="Enable OpenAI recipe recommendations.")
+#     parser.add_argument("--openai-api-key", default=OPENAI_API_KEY, help="OpenAI API key.")
+#     args = parser.parse_args()
+
+#     result = run_recommendation(
+#         args.diet,
+#         args.pool,
+#         niter=args.niter,
+#         use_openai=args.use_openai,
+#         openai_api_key=args.openai_api_key
+#     )
+
+#     print(f"Original Score: {result['original_score']:.2f}")
+#     print(f"Recommended Score: {result['recommended_score']:.2f}")
+#     print(result['best_diet_table'])
+
+#     result['best_diet_table'].to_csv(args.out, index=False)
+
+#     for case in zip(result['best_diet_table']['Original_Food'], result['best_diet_table']['New_Food']):
+#         print(f"Replace '{case[0]}' with '{case[1]}'")
+
+#     if result.get("recipe_info"):
+#         print(result['recipe_info'])
+
+
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Generate HEI-optimized recommendations.")
+    parser = argparse.ArgumentParser(description="Generate 3 HEI-optimized bundles (Health, Cheap, Balanced).")
     parser.add_argument("--diet", required=True, help="Path to diet CSV (original cart).")
     parser.add_argument("--pool", required=True, help="Path to food pool CSV.")
-    parser.add_argument("--out", default="recommended_diet.csv", help="Output CSV path.")
+    # Changed --out to --out-prefix since we will generate 3 files
+    parser.add_argument("--out-prefix", default="recommended_diet", help="Prefix for output CSV paths.")
     parser.add_argument("--niter", type=int, default=1000, help="Simulated annealing iterations.")
     parser.add_argument("--use-openai", action="store_true", help="Enable OpenAI recipe recommendations.")
     parser.add_argument("--openai-api-key", default=OPENAI_API_KEY, help="OpenAI API key.")
     args = parser.parse_args()
 
-    result = run_recommendation(
-        args.diet,
-        args.pool,
+    # 1. Load DataFrames manually
+    try:
+        print(f"Loading diet from: {args.diet}")
+        diet_df = pd.read_csv(args.diet)
+        print(f"Loading pool from: {args.pool}")
+        food_pool_df = pd.read_csv(args.pool)
+    except Exception as e:
+        print(f"Error loading CSV files: {e}")
+        exit(1)
+
+    # 2. Call the new wrapper function
+    print(f"Running optimization ({args.niter} iterations)...")
+    results = get_all_three_bundles(
+        diet_df,
+        food_pool_df,
         niter=args.niter,
         use_openai=args.use_openai,
         openai_api_key=args.openai_api_key
     )
 
-    print(f"Original Score: {result['original_score']:.2f}")
-    print(f"Recommended Score: {result['recommended_score']:.2f}")
-    print(result['best_diet_table'])
+    # 3. Iterate through results and print/save each bundle
+    print("\n" + "="*60)
+    print("OPTIMIZATION RESULTS")
+    print("="*60)
 
-    result['best_diet_table'].to_csv(args.out, index=False)
+    for bundle_name, data in results.items():
+        print(f"\n--- {bundle_name.upper()} BUNDLE ---")
+        
+        # Print Stats
+        print(f"Original Score : {data['original_score']:.2f}")
+        print(f"New Score      : {data['recommended_score']:.2f}")
+        print(f"Original Cost  : ${data['original_cost']:.2f}")
+        print(f"New Cost       : ${data['recommended_cost']:.2f}")
+        
+        # Save CSV
+        out_filename = f"{args.out_prefix}_{bundle_name}.csv"
+        data['best_diet_table'].to_csv(out_filename, index=False)
+        print(f"Saved CSV to   : {out_filename}")
 
-    for case in zip(result['best_diet_table']['Original_Food'], result['best_diet_table']['New_Food']):
-        print(f"Replace '{case[0]}' with '{case[1]}'")
+        # Show Key Swaps (Optional visualization)
+        print("Key Swaps:")
+        table = data['best_diet_table']
+        swaps = table[table['Original_Food'] != table['New_Food']]
+        if swaps.empty:
+            print("  (No changes made)")
+        else:
+            for _, row in swaps.head(5).iterrows(): # Show top 5 swaps
+                print(f"  * {row['Original_Food']} -> {row['New_Food']}")
+            if len(swaps) > 5:
+                print(f"  ... and {len(swaps) - 5} more.")
 
-    if result.get("recipe_info"):
-        print(result['recipe_info'])
+        # Show Recipe info if available
+        if data.get("recipe_info"):
+            print(f"Recipe Suggestion: {data['recipe_info']}")
+
+    print("\nDone.")

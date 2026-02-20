@@ -5,7 +5,9 @@ const results = document.getElementById("results");
 const statusEl = document.getElementById("status");
 const summaryEl = document.getElementById("summary");
 const originalScoreEl = document.getElementById("originalScore");
-const recommendedScoreEl = document.getElementById("recommendedScore");
+const healthiestScoreEl = document.getElementById("healthiestScore");
+const cheapestCostEl = document.getElementById("cheapestCost");
+const balancedScoreEl = document.getElementById("balancedScore");
 const downloadLink = document.getElementById("downloadLink");
 const categoryPanel = document.getElementById("categoryPanel");
 const categoryList = document.getElementById("categoryList");
@@ -16,9 +18,30 @@ const recipeEl = document.getElementById("recipe");
 const recipeNameEl = document.getElementById("recipeName");
 const recipeInstructionsEl = document.getElementById("recipeInstructions");
 const recipeIngredientsEl = document.getElementById("recipeIngredients");
+const stickyEl = document.getElementById("sticky");
+const stickyCostEl = document.getElementById("stickyCost");
+const stickyCostDeltaEl = document.getElementById("stickyCostDelta");
+const stickyHealthEl = document.getElementById("stickyHealth");
+const stickyHealthDeltaEl = document.getElementById("stickyHealthDelta");
+const stickyComponentsEl = document.getElementById("stickyComponents");
+const stickyNoteEl = document.getElementById("stickyNote");
+const focusViewEl = document.getElementById("focusView");
+const focusBodyEl = document.getElementById("focusBody");
+const focusTitleEl = document.getElementById("focusTitle");
+const focusSubtitleEl = document.getElementById("focusSubtitle");
+const focusProgressEl = document.getElementById("focusProgress");
+const navTabs = document.querySelectorAll(".top-nav__tab");
 
 let rows = [];
+let initialRows = [];
 let uploadedFile = null;
+let baseTotals = { cost: 0, score: 0 };
+let initialTotals = { cost: 0, score: 0 };
+let baseComponents = {};
+let initialComponents = {};
+let currentSelection = null; // { rowIndex, optionKey, ghostTotals }
+let currentView = "list"; // list | focus
+let currentIndex = 0;
 
 const COMPONENT_LABELS = {
   HEI2015C1_TOTALVEG: "Vegetables",
@@ -31,46 +54,14 @@ const COMPONENT_LABELS = {
   HEI2015C11_REFINEDGRAIN: "Refined Grains",
   HEI2015C12_SFAT: "Saturated Fat",
   HEI2015C13_ADDSUG: "Sugar",
-  HEI2015_TOTAL_SCORE: "Total HEI score",
 };
 
-const COMPONENT_COLORS = {
-  HEI2015C1_TOTALVEG: "#5bbf62",
-  HEI2015C3_TOTALFRUIT: "#e44d4d",
-  HEI2015C5_WHOLEGRAIN: "#f28b2c",
-  HEI2015C6_TOTALDAIRY: "#3b84c5",
-  HEI2015C7_TOTPROT: "#6b4ca5",
-  HEI2015C9_FATTYACID: "#f2b632",
-  HEI2015C10_SODIUM: "#46b2c3",
-  HEI2015C11_REFINEDGRAIN: "#cc3aa3",
-  HEI2015C12_SFAT: "#f2a93b",
-  HEI2015C13_ADDSUG: "#8e63a8",
-  HEI2015_TOTAL_SCORE: "#1c1b19",
-};
-
-const COMPONENT_MAX = {
-  HEI2015C1_TOTALVEG: 5,
-  HEI2015C3_TOTALFRUIT: 5,
-  HEI2015C5_WHOLEGRAIN: 10,
-  HEI2015C6_TOTALDAIRY: 10,
-  HEI2015C7_TOTPROT: 5,
-  HEI2015C9_FATTYACID: 10,
-  HEI2015C10_SODIUM: 10,
-  HEI2015C11_REFINEDGRAIN: 10,
-  HEI2015C12_SFAT: 10,
-  HEI2015C13_ADDSUG: 10,
-  HEI2015_TOTAL_SCORE: 100,
-};
-
-const MYPLATE_KEYS = [
+const COMPONENT_ORDER = [
   "HEI2015C1_TOTALVEG",
   "HEI2015C3_TOTALFRUIT",
   "HEI2015C5_WHOLEGRAIN",
   "HEI2015C6_TOTALDAIRY",
   "HEI2015C7_TOTPROT",
-];
-
-const MODERATE_KEYS = [
   "HEI2015C9_FATTYACID",
   "HEI2015C10_SODIUM",
   "HEI2015C11_REFINEDGRAIN",
@@ -78,18 +69,28 @@ const MODERATE_KEYS = [
   "HEI2015C13_ADDSUG",
 ];
 
-const ICONS = {
-  HEI2015C1_TOTALVEG: "assets/icons/vegetables.png",
-  HEI2015C3_TOTALFRUIT: "assets/icons/fruits.png",
-  HEI2015C5_WHOLEGRAIN: "assets/icons/grains.png",
-  HEI2015C6_TOTALDAIRY: "assets/icons/dairy.png",
-  HEI2015C7_TOTPROT: "assets/icons/protein.png",
-  HEI2015C9_FATTYACID: "assets/icons/unsaturated-fat.png",
-  HEI2015C10_SODIUM: "assets/icons/sodium.png",
-  HEI2015C11_REFINEDGRAIN: "assets/icons/refined-grains.png",
-  HEI2015C12_SFAT: "assets/icons/saturated-fat.png",
-  HEI2015C13_ADDSUG: "assets/icons/sugar.png",
+const MODERATION_COMPONENTS = new Set([]);
+
+const SLIDER_ORDER = [
+  "Keyword",
+  "wweia_food_category_description",
+  "Level_2_Category",
+  "Level_1_Category",
+];
+
+const OPTION_ICONS = {
+  balanced: "✨",
+  healthiest: "🌿",
+  cheapest: "💳",
 };
+
+const DEFAULT_OPTION_LABELS = {
+  balanced: "Balanced",
+  healthiest: "Healthier",
+  cheapest: "Cheaper",
+};
+
+const OPTION_LABEL_ORDER = ["Healthier", "Balanced", "Cheaper"];
 
 const setStatus = (message, isError = false) => {
   statusEl.textContent = message;
@@ -109,134 +110,439 @@ const formatPrice = (value) => {
   return value || "-";
 };
 
-const renderPaired = (filtered) => {
-  results.innerHTML = "";
-  filtered.forEach((row) => {
-    const card = document.createElement("article");
-    card.className = "card";
+const formatScore = (value) => {
+  const num = Number(value);
+  if (Number.isFinite(num)) {
+    return num.toFixed(1);
+  }
+  return "-";
+};
 
-    const aiPrefix = "AI Rec:";
-    const isAiRow = (row.Original_Food || "").startsWith(aiPrefix);
-    const originalLabel = isAiRow ? "New product" : "Original";
-    const originalName = isAiRow
-      ? row.Original_Food.replace(aiPrefix, "").trim()
-      : row.Original_Food;
-    const newName = row.New_Food || "";
-    const normalizedOriginal = (originalName || "").toLowerCase().trim();
-    const normalizedNew = newName.toLowerCase().trim();
-    const isSameProduct = normalizedOriginal && normalizedNew && normalizedOriginal === normalizedNew;
-    const showRecommended = !isSameProduct;
+const buildChips = (components = {}) => {
+  const chips = COMPONENT_ORDER.filter((key) => Number(components[key] || 0) > 0).map((key) => {
+    const value = Number(components[key]).toFixed(1);
+    return `<span class="chip">${COMPONENT_LABELS[key]} ${value}</span>`;
+  });
+  if (!chips.length) {
+    return "";
+  }
+  return `<div class="chip-group">${chips.join("")}</div>`;
+};
 
-    const recommendedBlock = showRecommended
-      ? `
-        <div class="card__item">
-          ${safeImage(row.New_Image_URL, row.New_Food || "Recommended product")}
-          <div>
-            <span class="card__label">Recommended</span>
-            <div>${row.New_Food || "(missing)"}</div>
+const sumComponents = (items) => {
+  const totals = {};
+  COMPONENT_ORDER.forEach((key) => {
+    totals[key] = 0;
+  });
+  (items || []).forEach((row) => {
+    const components = row.original?.components || {};
+    COMPONENT_ORDER.forEach((key) => {
+      totals[key] += Number(components[key] || 0);
+    });
+  });
+  return totals;
+};
+
+const applyComponentDelta = (base, from, to) => {
+  const next = { ...base };
+  COMPONENT_ORDER.forEach((key) => {
+    next[key] = Number(base[key] || 0) + (Number(to?.[key] || 0) - Number(from?.[key] || 0));
+  });
+  return next;
+};
+
+const isDeltaGoodSticky = (_key, delta) => delta >= 0;
+
+const isDeltaGoodSimple = (delta) => delta > 0;
+
+const buildDeltaChips = (from = {}, to = {}) => {
+  const chips = COMPONENT_ORDER.map((key) => {
+    const delta = Number(to[key] || 0) - Number(from[key] || 0);
+    if (Math.abs(delta) < 0.01) {
+      return null;
+    }
+    const arrow = delta > 0 ? "↗" : "↘";
+    const className = isDeltaGoodSimple(delta) ? "is-good" : "is-bad";
+    return `<span class="chip chip--delta ${className}">${COMPONENT_LABELS[key]} ${arrow}${Math.abs(delta).toFixed(1)}</span>`;
+  }).filter(Boolean);
+  if (!chips.length) {
+    return "";
+  }
+  return `<div class="chip-group chip-group--compact">${chips.join("")}</div>`;
+};
+
+const buildStickyComponents = (current = {}, base = {}, showDelta = false) => {
+  const chips = COMPONENT_ORDER.map((key) => {
+    const value = Number(current[key] || 0);
+    if (!showDelta && value <= 0) {
+      return null;
+    }
+    const delta = value - Number(base[key] || 0);
+    if (showDelta && Math.abs(delta) < 0.01) {
+      return null;
+    }
+    const arrow = delta > 0 ? "↗" : delta < 0 ? "↘" : "→";
+    const className = showDelta ? (isDeltaGoodSticky(key, delta) ? "is-good" : "is-bad") : "is-neutral";
+    const label = showDelta
+      ? `${COMPONENT_LABELS[key]} ${value.toFixed(1)} ${arrow}${Math.abs(delta).toFixed(1)}`
+      : `${COMPONENT_LABELS[key]} ${value.toFixed(1)}`;
+    return `<span class="chip chip--delta ${className}">${label}</span>`;
+  }).filter(Boolean);
+
+  if (!chips.length) {
+    return "";
+  }
+  return `<div class="chip-group chip-group--compact">${chips.join("")}</div>`;
+};
+
+const getOutcomeLabels = (row) => {
+  const labels = { ...DEFAULT_OPTION_LABELS };
+  if (!row?.options) return labels;
+
+  const candidates = ["balanced", "healthiest", "cheapest"]
+    .map((key) => ({
+      key,
+      data: row.options[key],
+    }))
+    .filter((item) => item.data && item.data.name);
+
+  if (candidates.length < 2) {
+    return labels;
+  }
+
+  candidates.forEach((item) => {
+    item.deltaScore =
+      Number(item.data.total_score_after ?? item.data.hei ?? 0) - Number(baseTotals.score || 0);
+    item.deltaCost =
+      Number(item.data.total_cost_after ?? item.data.price ?? 0) - Number(baseTotals.cost || 0);
+  });
+
+  candidates.sort((a, b) => {
+    if (b.deltaScore !== a.deltaScore) return b.deltaScore - a.deltaScore;
+    return a.deltaCost - b.deltaCost;
+  });
+  const healthiest = candidates.shift();
+  if (healthiest) {
+    labels[healthiest.key] = "Healthier";
+  }
+
+  if (candidates.length) {
+    candidates.sort((a, b) => {
+      if (a.deltaCost !== b.deltaCost) return a.deltaCost - b.deltaCost;
+      return b.deltaScore - a.deltaScore;
+    });
+    const cheapest = candidates.shift();
+    if (cheapest) {
+      labels[cheapest.key] = "Cheaper";
+    }
+  }
+
+  candidates.forEach((item) => {
+    labels[item.key] = "Balanced";
+  });
+
+  return labels;
+};
+
+const getOutcomeOptions = (row) => {
+  const labels = getOutcomeLabels(row);
+  const items = ["healthiest", "balanced", "cheapest"].map((key) => ({
+    key,
+    label: labels[key] || DEFAULT_OPTION_LABELS[key],
+    option: row.options?.[key],
+  }));
+  items.sort((a, b) => OPTION_LABEL_ORDER.indexOf(a.label) - OPTION_LABEL_ORDER.indexOf(b.label));
+  return items;
+};
+
+const updateSticky = (ghostTotals = null) => {
+  if (!stickyEl) return;
+  stickyEl.hidden = rows.length === 0;
+
+  if (!ghostTotals) {
+    stickyCostEl.textContent = formatPrice(baseTotals.cost);
+    stickyHealthEl.textContent = formatScore(baseTotals.score);
+    stickyCostDeltaEl.textContent = "";
+    stickyHealthDeltaEl.textContent = "";
+    stickyNoteEl.textContent = "Live impact";
+    stickyCostDeltaEl.className = "sticky__delta";
+    stickyHealthDeltaEl.className = "sticky__delta";
+    if (stickyComponentsEl) {
+      stickyComponentsEl.innerHTML = buildStickyComponents(baseComponents, baseComponents, false);
+    }
+    return;
+  }
+
+  const costDelta = ghostTotals.cost - baseTotals.cost;
+  const healthDelta = ghostTotals.score - baseTotals.score;
+  const ghostComponents = ghostTotals.components || baseComponents;
+
+  stickyCostEl.textContent = formatPrice(ghostTotals.cost);
+  stickyHealthEl.textContent = formatScore(ghostTotals.score);
+
+  const costArrow = costDelta > 0 ? "↗" : costDelta < 0 ? "↘" : "→";
+  const healthArrow = healthDelta > 0 ? "↗" : healthDelta < 0 ? "↘" : "→";
+
+  stickyCostDeltaEl.textContent = `${costArrow} ${formatPrice(Math.abs(costDelta))}`;
+  stickyHealthDeltaEl.textContent = `${healthArrow} ${formatScore(Math.abs(healthDelta))}`;
+
+  stickyCostDeltaEl.className = `sticky__delta ${costDelta <= 0 ? "is-good" : "is-bad"}`;
+  stickyHealthDeltaEl.className = `sticky__delta ${healthDelta >= 0 ? "is-good" : "is-bad"}`;
+  stickyNoteEl.textContent = "Showing trade-offs";
+  if (stickyComponentsEl) {
+    stickyComponentsEl.innerHTML = buildStickyComponents(ghostComponents, baseComponents, true);
+  }
+};
+
+const renderOptionCard = (rowIndex, label, optionKey, option, original) => {
+  const optionKeyLower = optionKey.toLowerCase();
+  const safeOption = option || {};
+  const originalName = original?.name || "";
+  const normalizedOriginal = originalName.toLowerCase().trim();
+  const normalizedOption = (safeOption.name || "").toLowerCase().trim();
+  const isSame = normalizedOriginal && normalizedOption && normalizedOriginal === normalizedOption;
+  const selected = currentSelection && currentSelection.rowIndex === rowIndex && currentSelection.optionKey === optionKeyLower;
+
+  if (isSame) {
+    return `
+      <div class="option-card option-card--good">
+        <div>
+          <div class="option-card__tag">
+            <span class="option-card__icon">${OPTION_ICONS[optionKeyLower] || "✨"}</span>
+            ${label}
           </div>
+          <div class="option-card__good">This was a good choice!</div>
         </div>
-      `
-      : "";
-
-    const recommendationPill = showRecommended
-      ? `<span class="card__pill">New: ${formatPrice(row.New_Price)}</span>`
-      : `<span class="card__pill">This was a good choice!</span>`;
-
-    card.innerHTML = `
-      <div class="card__pair">
-        <div class="card__item">
-          ${safeImage(row.Original_Image_URL, row.Original_Food || "Original product")}
-          <div>
-            <span class="card__label">${originalLabel}</span>
-            <div>${originalName || "(missing)"}</div>
-          </div>
-        </div>
-        ${recommendedBlock}
-      </div>
-      <div class="card__meta">
-        <span class="card__pill">${row.Target_Category || "Category unknown"}</span>
-        <span class="card__pill">Original: ${formatPrice(row.Original_Price)}</span>
-        ${recommendationPill}
       </div>
     `;
-    results.appendChild(card);
-  });
+  }
+
+  const comparisonComponents = safeOption.total_components_after || safeOption.components || {};
+  const chips = buildDeltaChips(baseComponents, comparisonComponents);
+  const deltaPrice = Number(safeOption.total_cost_after ?? safeOption.price ?? 0) - Number(baseTotals.cost || 0);
+  const deltaScore = Number(safeOption.total_score_after ?? safeOption.hei ?? 0) - Number(baseTotals.score || 0);
+  const priceLabel = `${deltaPrice >= 0 ? "+" : "-"}${formatPrice(Math.abs(deltaPrice))}`;
+  const scoreLabel = `${deltaScore >= 0 ? "+" : "-"}${formatScore(Math.abs(deltaScore))} HEI`;
+  const priceClass = deltaPrice <= 0 ? "is-good" : "is-bad";
+  const scoreClass = deltaScore >= 0 ? "is-good" : "is-bad";
+
+  return `
+    <div class="option-card ${selected ? "is-selected" : ""}" data-action="select" data-row="${rowIndex}" data-option="${optionKeyLower}">
+      <div class="option-card__media">
+        ${safeImage(safeOption.image, safeOption.name || "Recommended product")}
+      </div>
+      <div>
+        <div class="option-card__tag">
+          <span class="option-card__icon">${OPTION_ICONS[optionKeyLower] || "✨"}</span>
+          ${label}
+        </div>
+        <div class="option-card__name">${safeOption.name || "(missing)"}</div>
+      </div>
+      <div class="option-card__meta">
+        <div class="option-card__price ${priceClass}">${priceLabel}</div>
+        <div class="option-card__score ${scoreClass}">${scoreLabel}</div>
+        ${chips}
+      </div>
+      ${selected ? `<button class="option-card__confirm" data-action="confirm" data-row="${rowIndex}" data-option="${optionKeyLower}">Confirm Swap</button>` : ""}
+    </div>
+  `;
+};
+
+const renderCards = (filtered) => {
+  results.innerHTML = filtered
+    .map(({ row, index }) => {
+      const original = row.original || {};
+      const originalName = original.name || "";
+      const originalChips = buildChips(original.components);
+      const outcomeOptions = getOutcomeOptions(row);
+
+      const targetLabel = row.target_category || row.target_category_column || "";
+
+      return `
+        <article class="product-card">
+          <div class="product-card__head">
+            <div class="product-card__anchor">
+              ${safeImage(original.image, originalName || "Original product")}
+              <div>
+                <div class="anchor__label">Original</div>
+                <div class="anchor__name">${originalName || "(missing)"}</div>
+                <div class="anchor__price">${formatPrice(original.price)}</div>
+                ${originalChips}
+              </div>
+            </div>
+            <div class="anchor__category">${targetLabel}</div>
+          </div>
+          <div class="product-card__options">
+            <div class="options__title">Better alternatives</div>
+            ${outcomeOptions
+              .map((item) => renderOptionCard(index, item.label, item.key, item.option, original))
+              .join("")}
+          </div>
+        </article>
+      `;
+    })
+    .join("");
+};
+
+const renderFocus = () => {
+  if (!focusViewEl) return;
+  if (!rows.length) {
+    focusViewEl.classList.remove("is-summary");
+    focusTitleEl.textContent = "Focus mode";
+    focusSubtitleEl.textContent = "Upload and run recommendations to begin.";
+    focusProgressEl.textContent = "0%";
+    focusBodyEl.innerHTML = `<div class="focus-empty">Upload a cart and run recommendations to start reviewing items.</div>`;
+    return;
+  }
+
+  if (currentIndex >= rows.length) {
+    focusViewEl.classList.add("is-summary");
+    focusTitleEl.textContent = "Selection Complete!";
+    focusSubtitleEl.textContent = "";
+    focusProgressEl.textContent = "100%";
+
+    const listItems = rows
+      .map((row) => {
+        return `<li><span>${row.original.name}</span><span>${formatPrice(row.original.price)}</span></li>`;
+      })
+      .join("");
+
+    focusBodyEl.innerHTML = `
+      <div class="summary-card">
+        <div class="summary-card__icon">✓</div>
+        <h3>Selection Complete!</h3>
+        <p class="muted">Here is the summary of your curated basket.</p>
+        <div class="summary-card__stats">
+          <div>
+            <p class="summary__label">Total Cost</p>
+            <p class="summary__value">${formatPrice(baseTotals.cost)}</p>
+          </div>
+          <div>
+            <p class="summary__label">Nutrition Score</p>
+            <p class="summary__value">${formatScore(baseTotals.score)}</p>
+          </div>
+        </div>
+        <ul class="summary-card__list">${listItems}</ul>
+        <button class="run-btn" id="restartBtn">Start Over</button>
+      </div>
+    `;
+
+    const restartBtn = document.getElementById("restartBtn");
+    if (restartBtn) {
+      restartBtn.addEventListener("click", () => {
+        rows = JSON.parse(JSON.stringify(initialRows));
+        baseTotals = { ...initialTotals };
+        baseComponents = { ...initialComponents };
+        currentIndex = 0;
+        currentSelection = null;
+        render();
+      });
+    }
+    return;
+  }
+
+  focusViewEl.classList.remove("is-summary");
+
+  const row = rows[currentIndex];
+  const original = row.original;
+  const progress = Math.round(((currentIndex + 1) / rows.length) * 100);
+  const focusLabel = row.target_category || row.target_category_column || "item";
+  focusTitleEl.textContent = `Reviewing ${focusLabel}`;
+  focusSubtitleEl.textContent = `Item ${currentIndex + 1} of ${rows.length}`;
+  focusProgressEl.textContent = `${progress}%`;
+
+  const originalChips = buildChips(original.components);
+  const outcomeOptions = getOutcomeOptions(row);
+
+  const buildOption = (label, optionKey, option) => {
+    const lower = optionKey.toLowerCase();
+    if (!option) {
+      return `
+        <div class="swap-card swap-card--good">
+          <div class="swap-card__icon">•</div>
+          <div class="swap-card__label">${label}</div>
+          <div class="swap-card__name">No option available</div>
+        </div>
+      `;
+    }
+    const selected = currentSelection && currentSelection.rowIndex === currentIndex && currentSelection.optionKey === lower;
+    const comparisonComponents = option.total_components_after || option.components || {};
+    const deltaChips = buildDeltaChips(baseComponents, comparisonComponents);
+    const deltaCost = Number(option.total_cost_after ?? option.price ?? 0) - Number(baseTotals.cost || 0);
+    const deltaScore = Number(option.total_score_after ?? option.hei ?? 0) - Number(baseTotals.score || 0);
+    const costLabel = `${deltaCost >= 0 ? "+" : "-"}${formatPrice(Math.abs(deltaCost))}`;
+    const scoreLabel = `${deltaScore >= 0 ? "+" : "-"}${formatScore(Math.abs(deltaScore))} HEI`;
+    const normalizedOriginal = (original.name || "").toLowerCase().trim();
+    const normalizedOption = (option.name || "").toLowerCase().trim();
+    const isSame = normalizedOriginal && normalizedOption && normalizedOriginal === normalizedOption;
+
+    if (isSame) {
+      return `
+        <div class="swap-card swap-card--good">
+          <div class="swap-card__icon">✓</div>
+          <div class="swap-card__label">${label}</div>
+          <div class="swap-card__name">This was a good choice!</div>
+        </div>
+      `;
+    }
+
+    return `
+      <div class="swap-card ${selected ? "is-selected" : ""}" data-action="select" data-row="${currentIndex}" data-option="${lower}">
+        <div class="swap-card__icon">${OPTION_ICONS[lower] || "✨"}</div>
+        <div class="swap-card__media">
+          ${safeImage(option.image, option.name || "Recommended product")}
+        </div>
+        <div class="swap-card__label">${label}</div>
+        <div class="swap-card__name">${option.name || "(missing)"}</div>
+        <div class="swap-card__delta ${deltaCost <= 0 ? "is-good" : "is-bad"}">${costLabel}</div>
+        <div class="swap-card__delta ${deltaScore >= 0 ? "is-good" : "is-bad"}">${scoreLabel}</div>
+        ${deltaChips}
+        ${selected ? `<button class="swap-card__confirm" data-action="confirm" data-row="${currentIndex}" data-option="${lower}">Confirm Swap</button>` : ""}
+      </div>
+    `;
+  };
+
+  focusBodyEl.innerHTML = `
+    <div class="hero-card">
+      <div class="hero-card__title">Currently selected</div>
+      <div class="hero-card__content">
+        ${safeImage(original.image, original.name)}
+        <div>
+          <div class="hero-card__name">${original.name}</div>
+          <div class="hero-card__price">${formatPrice(original.price)}</div>
+          ${originalChips}
+        </div>
+      </div>
+      <button class="hero-card__keep" data-action="keep">Keep This Item</button>
+    </div>
+    <div class="swap-divider">OR SWAP FOR</div>
+    <div class="swap-grid">
+      ${outcomeOptions
+        .map((item) => buildOption(item.label, item.key, item.option))
+        .join("")}
+    </div>
+  `;
 };
 
 const render = () => {
   const query = searchInput.value.trim().toLowerCase();
-  const filtered = rows.filter((row) => {
-    return (
-      row.Original_Food?.toLowerCase().includes(query) ||
-      row.New_Food?.toLowerCase().includes(query) ||
-      row.Target_Category?.toLowerCase().includes(query)
-    );
-  });
+  const filtered = rows
+    .map((row, index) => ({ row, index }))
+    .filter(({ row }) => {
+      const originalName = row.original?.name?.toLowerCase() || "";
+      const options = row.options || {};
+      return (
+        originalName.includes(query) ||
+        (options.healthiest?.name || "").toLowerCase().includes(query) ||
+        (options.cheapest?.name || "").toLowerCase().includes(query) ||
+        (options.balanced?.name || "").toLowerCase().includes(query) ||
+        (row.target_category || "").toLowerCase().includes(query)
+      );
+    });
 
-  renderPaired(filtered);
-};
-
-const renderComponentRow = (key, original, recommended) => {
-  const max = COMPONENT_MAX[key] || 1;
-  const before = Number(original?.[key] ?? 0);
-  const after = Number(recommended?.[key] ?? 0);
-  const beforePct = Math.min(100, Math.max(0, (before / max) * 100));
-  const afterPct = Math.min(100, Math.max(0, (after / max) * 100));
-  const color = COMPONENT_COLORS[key] || "#1c1b19";
-  const iconPath = ICONS[key];
-  const icon = iconPath ? `<img src="${iconPath}" alt="" />` : "";
-
-  const left = Math.min(beforePct, afterPct);
-  const width = Math.max(4, Math.abs(afterPct - beforePct));
-
-  const row = document.createElement("div");
-  row.className = "score-row";
-  row.innerHTML = `
-    <div class="score-row__label" style="color:${color}">
-      <div class="score-row__icon">${icon}</div>
-      <div>${COMPONENT_LABELS[key]}</div>
-    </div>
-    <div class="score-row__track">
-      <div class="score-row__line"></div>
-      <div class="score-row__segment" style="left:${left}%; width:${width}%; background:${color}"></div>
-      <div class="score-row__dot is-before" style="left:${beforePct}%; border-color:${color}; color:${color}">
-        <span>${beforePct.toFixed(0)}%</span>
-      </div>
-      <div class="score-row__dot is-after" style="left:${afterPct}%; background:${color}; color:${color}">
-        <span>${afterPct.toFixed(0)}%</span>
-      </div>
-    </div>
-  `;
-  return row;
-};
-
-const renderComponents = (original, recommended) => {
-  componentsEl.innerHTML = "";
-
-  const plateBox = document.createElement("div");
-  plateBox.className = "score-box";
-  plateBox.innerHTML = `<h3>MyPlate Breakdown</h3>`;
-  MYPLATE_KEYS.forEach((key) => {
-    plateBox.appendChild(renderComponentRow(key, original, recommended));
-  });
-
-  const modBox = document.createElement("div");
-  modBox.className = "score-box";
-  modBox.innerHTML = `<h3>Components to Moderate</h3>`;
-  MODERATE_KEYS.forEach((key) => {
-    modBox.appendChild(renderComponentRow(key, original, recommended));
-  });
-
-  const totalBox = document.createElement("div");
-  totalBox.className = "score-box";
-  totalBox.innerHTML = `<h3>Total HEI Score</h3>`;
-  totalBox.appendChild(renderComponentRow("HEI2015_TOTAL_SCORE", original, recommended));
-
-  componentsEl.appendChild(plateBox);
-  componentsEl.appendChild(modBox);
-  componentsEl.appendChild(totalBox);
-  componentsEl.hidden = false;
+  renderCards(filtered);
+  renderFocus();
+  updateSticky(currentSelection ? currentSelection.ghostTotals : null);
 };
 
 const renderRecipe = (recipeData, recipeInfo) => {
@@ -247,8 +553,7 @@ const renderRecipe = (recipeData, recipeInfo) => {
 
   if (recipeData) {
     recipeNameEl.textContent = recipeData.recipe_name || "";
-    const instructions = recipeData.instructions || "";
-    recipeInstructionsEl.textContent = instructions.replace(/\\n/g, "\n");
+    recipeInstructionsEl.textContent = (recipeData.instructions || "").replace(/\\n/g, "\n");
     recipeIngredientsEl.innerHTML = "";
     (recipeData.missing_ingredients || []).forEach((item) => {
       const li = document.createElement("li");
@@ -264,6 +569,23 @@ const renderRecipe = (recipeData, recipeInfo) => {
   recipeEl.hidden = false;
 };
 
+const renderComponents = () => {
+  if (componentsEl) {
+    componentsEl.hidden = true;
+    componentsEl.innerHTML = "";
+  }
+};
+
+const updateSliderLabels = (labelsContainer, index) => {
+  labelsContainer.querySelectorAll("span").forEach((label, idx) => {
+    if (idx === index) {
+      label.classList.add("is-active");
+    } else {
+      label.classList.remove("is-active");
+    }
+  });
+};
+
 const buildCategoryOptions = (items) => {
   categoryList.innerHTML = "";
 
@@ -271,37 +593,35 @@ const buildCategoryOptions = (items) => {
     const row = document.createElement("div");
     row.className = "category-row";
 
-    const select = document.createElement("select");
-    select.dataset.index = item.index;
+    const values = item.values || {};
 
-    const defaultOption = document.createElement("option");
-    defaultOption.value = "";
-    defaultOption.textContent = "Select a category";
-    select.appendChild(defaultOption);
+    const labels = document.createElement("div");
+    labels.className = "slider-labels";
+    SLIDER_ORDER.forEach((col) => {
+      const span = document.createElement("span");
+      span.textContent = values[col] || "—";
+      labels.appendChild(span);
+    });
 
-    item.options.forEach((option) => {
-      const opt = document.createElement("option");
-      opt.value = JSON.stringify({
-        column: option.column,
-        value: option.value,
-        description: option.description || "",
-      });
-      opt.textContent = option.label;
-      select.appendChild(opt);
+    const slider = document.createElement("input");
+    slider.type = "range";
+    slider.min = 0;
+    slider.max = SLIDER_ORDER.length - 1;
+    slider.step = 1;
+    slider.value = Number.isFinite(item.default_index) ? item.default_index : 0;
+    slider.dataset.index = item.index;
+    slider.dataset.values = JSON.stringify(values);
+
+    updateSliderLabels(labels, Number(slider.value));
+
+    slider.addEventListener("input", () => {
+      updateSliderLabels(labels, Number(slider.value));
     });
 
     row.innerHTML = `<strong>${item.product_name}</strong>`;
-    row.appendChild(select);
+    row.appendChild(labels);
+    row.appendChild(slider);
     categoryList.appendChild(row);
-
-    if (item.default) {
-      const targetValue = JSON.stringify({
-        column: item.default.column,
-        value: item.default.value,
-        description: item.default.description || "",
-      });
-      select.value = targetValue;
-    }
   });
 
   categoryPanel.hidden = false;
@@ -344,14 +664,19 @@ const runRecommendations = (useOpenAI = false) => {
   if (!uploadedFile) return;
 
   const overrides = [];
-  categoryList.querySelectorAll("select").forEach((select) => {
-    if (!select.value) return;
-    const parsed = JSON.parse(select.value);
+  categoryList.querySelectorAll("input[type=range]").forEach((slider) => {
+    const values = JSON.parse(slider.dataset.values || "{}");
+    const idx = Number(slider.value);
+    const column = SLIDER_ORDER[idx];
+    const value = values[column];
+    if (!value) {
+      return;
+    }
     overrides.push({
-      index: Number(select.dataset.index),
-      column: parsed.column,
-      value: parsed.value,
-      description: parsed.description,
+      index: Number(slider.dataset.index),
+      column,
+      value,
+      description: "",
     });
   });
 
@@ -379,8 +704,33 @@ const runRecommendations = (useOpenAI = false) => {
       }
 
       rows = data.rows || [];
-      originalScoreEl.textContent = data.original_score?.toFixed(2) ?? "-";
-      recommendedScoreEl.textContent = data.recommended_score?.toFixed(2) ?? "-";
+      initialRows = JSON.parse(JSON.stringify(rows));
+      const summary = data.summary || {};
+      const summaryCost = Number(summary.original_cost);
+      const baseComponentsData = data.base_components || {};
+      const baseScoreValue = Number(baseComponentsData.HEI2015_TOTAL_SCORE ?? summary.original_score);
+      baseTotals = {
+        cost: Number.isFinite(summaryCost)
+          ? summaryCost
+          : rows.reduce((sum, row) => sum + Number(row.original?.price || 0), 0),
+        score: Number.isFinite(baseScoreValue)
+          ? baseScoreValue
+          : rows.reduce((sum, row) => sum + Number(row.original?.hei || 0), 0),
+      };
+      initialTotals = { ...baseTotals };
+      baseComponents = baseComponentsData;
+      if (!Object.keys(baseComponents).length) {
+        baseComponents = sumComponents(rows);
+      }
+      initialComponents = { ...baseComponents };
+
+      currentSelection = null;
+      currentIndex = 0;
+
+      originalScoreEl.textContent = formatScore(summary.original_score);
+      healthiestScoreEl.textContent = formatScore(summary.healthiest_score);
+      cheapestCostEl.textContent = formatPrice(summary.cheapest_cost);
+      balancedScoreEl.textContent = formatScore(summary.balanced_score);
       summaryEl.hidden = false;
 
       renderComponents(data.original_components, data.recommended_components);
@@ -399,14 +749,114 @@ const runRecommendations = (useOpenAI = false) => {
     });
 };
 
+const handleOptionSelect = (rowIndex, optionKey) => {
+  const row = rows[rowIndex];
+  if (!row) return;
+  const option = row.options[optionKey.toLowerCase()];
+  if (!option) return;
+
+  if (currentSelection && currentSelection.rowIndex === rowIndex && currentSelection.optionKey === optionKey.toLowerCase()) {
+    currentSelection = null;
+    render();
+    return;
+  }
+
+  const ghostTotals = {
+    cost: Number(option.total_cost_after ?? baseTotals.cost + (option.price - row.original.price)),
+    score: Number(option.total_score_after ?? baseTotals.score + (option.hei - row.original.hei)),
+    components: option.total_components_after || applyComponentDelta(baseComponents, row.original.components, option.components),
+  };
+
+  currentSelection = {
+    rowIndex,
+    optionKey: optionKey.toLowerCase(),
+    ghostTotals,
+  };
+  render();
+};
+
+const handleConfirm = (rowIndex, optionKey) => {
+  const row = rows[rowIndex];
+  if (!row) return;
+  const key = optionKey.toLowerCase();
+  const option = row.options[key];
+  if (!option) return;
+
+  const prevTotals = { ...baseTotals };
+  const prevComponents = { ...baseComponents };
+
+  const oldOriginal = row.original;
+  row.original = {
+    name: option.name,
+    price: option.price,
+    image: option.image,
+    components: option.components,
+    hei: option.hei,
+  };
+
+  row.options[key] = {
+    name: oldOriginal.name,
+    price: oldOriginal.price,
+    image: oldOriginal.image,
+    components: oldOriginal.components,
+    hei: oldOriginal.hei,
+    total_cost_after: prevTotals.cost,
+    total_score_after: prevTotals.score,
+    total_components_after: prevComponents,
+  };
+
+  baseTotals = {
+    cost: Number(option.total_cost_after ?? baseTotals.cost + (option.price - oldOriginal.price)),
+    score: Number(option.total_score_after ?? baseTotals.score + (option.hei - oldOriginal.hei)),
+  };
+  baseComponents = option.total_components_after || applyComponentDelta(baseComponents, oldOriginal.components, option.components);
+
+  currentSelection = null;
+  stickyEl.classList.remove("flash");
+  void stickyEl.offsetWidth;
+  stickyEl.classList.add("flash");
+
+  if (currentView === "focus") {
+    currentIndex += 1;
+  }
+
+  render();
+};
+
+const handleKeep = () => {
+  currentSelection = null;
+  if (currentView === "focus") {
+    currentIndex += 1;
+    render();
+  }
+};
+
+const setView = (view) => {
+  currentView = view;
+  navTabs.forEach((tab) => {
+    tab.classList.toggle("is-active", tab.dataset.view === view);
+  });
+  results.hidden = view !== "list";
+  focusViewEl.hidden = view !== "focus";
+  document.body.classList.toggle("is-focus", view === "focus");
+  render();
+};
+
 const loadFile = (file) => {
   if (!file) return;
   uploadedFile = file;
   rows = [];
+  initialRows = [];
+  baseTotals = { cost: 0, score: 0 };
+  baseComponents = {};
+  initialTotals = { cost: 0, score: 0 };
+  initialComponents = {};
   results.innerHTML = "";
   summaryEl.hidden = true;
   componentsEl.hidden = true;
   recipeEl.hidden = true;
+  currentSelection = null;
+  currentIndex = 0;
   fetchOptions(file);
 };
 
@@ -419,6 +869,52 @@ runBtn.addEventListener("click", () => runRecommendations(false));
 runRecipeBtn.addEventListener("click", () => runRecommendations(true));
 
 searchInput.addEventListener("input", render);
+
+results.addEventListener("click", (event) => {
+  const confirmBtn = event.target.closest("[data-action='confirm']");
+  if (confirmBtn) {
+    const rowIndex = Number(confirmBtn.dataset.row);
+    const optionKey = confirmBtn.dataset.option;
+    handleConfirm(rowIndex, optionKey);
+    return;
+  }
+
+  const optionCard = event.target.closest("[data-action='select']");
+  if (optionCard) {
+    const rowIndex = Number(optionCard.dataset.row);
+    const optionKey = optionCard.dataset.option;
+    handleOptionSelect(rowIndex, optionKey);
+  }
+});
+
+focusBodyEl.addEventListener("click", (event) => {
+  const keepBtn = event.target.closest("[data-action='keep']");
+  if (keepBtn) {
+    handleKeep();
+    return;
+  }
+
+  const confirmBtn = event.target.closest("[data-action='confirm']");
+  if (confirmBtn) {
+    const rowIndex = Number(confirmBtn.dataset.row);
+    const optionKey = confirmBtn.dataset.option;
+    handleConfirm(rowIndex, optionKey);
+    return;
+  }
+
+  const optionCard = event.target.closest("[data-action='select']");
+  if (optionCard) {
+    const rowIndex = Number(optionCard.dataset.row);
+    const optionKey = optionCard.dataset.option;
+    handleOptionSelect(rowIndex, optionKey);
+  }
+});
+
+navTabs.forEach((tab) => {
+  tab.addEventListener("click", () => {
+    setView(tab.dataset.view);
+  });
+});
 
 ["dragenter", "dragover"].forEach((eventName) => {
   dropZone.addEventListener(eventName, (event) => {
@@ -439,3 +935,5 @@ dropZone.addEventListener("drop", (event) => {
   fileInput.files = event.dataTransfer.files;
   loadFile(file);
 });
+
+setView("list");
