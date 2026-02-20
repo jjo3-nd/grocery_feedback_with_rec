@@ -124,7 +124,10 @@ const renderPaired = (filtered) => {
     const newName = row.New_Food || "";
     const normalizedOriginal = (originalName || "").toLowerCase().trim();
     const normalizedNew = newName.toLowerCase().trim();
-    const isSameProduct = normalizedOriginal && normalizedNew && normalizedOriginal === normalizedNew;
+    const isSameProduct =
+      normalizedOriginal &&
+      normalizedNew &&
+      normalizedOriginal === normalizedNew;
     const showRecommended = !isSameProduct;
 
     const recommendedBlock = showRecommended
@@ -231,7 +234,9 @@ const renderComponents = (original, recommended) => {
   const totalBox = document.createElement("div");
   totalBox.className = "score-box";
   totalBox.innerHTML = `<h3>Total HEI Score</h3>`;
-  totalBox.appendChild(renderComponentRow("HEI2015_TOTAL_SCORE", original, recommended));
+  totalBox.appendChild(
+    renderComponentRow("HEI2015_TOTAL_SCORE", original, recommended),
+  );
 
   componentsEl.appendChild(plateBox);
   componentsEl.appendChild(modBox);
@@ -307,15 +312,6 @@ const buildCategoryOptions = (items) => {
   categoryPanel.hidden = false;
 };
 
-const parseJsonResponse = async (res) => {
-  const text = await res.text();
-  try {
-    return JSON.parse(text);
-  } catch (error) {
-    return { error: text || "Unexpected server response." };
-  }
-};
-
 const fetchOptions = (file) => {
   const formData = new FormData();
   formData.append("diet", file);
@@ -326,9 +322,14 @@ const fetchOptions = (file) => {
     method: "POST",
     body: formData,
   })
-    .then(parseJsonResponse)
+    .then((resp) => {
+      if (!resp.ok) {
+        throw new Error(`${resp.status}`);
+      }
+      return resp.json();
+    })
     .then((data) => {
-      if (data.error) {
+      if (data?.error) {
         setStatus(data.error, true);
         return;
       }
@@ -340,7 +341,7 @@ const fetchOptions = (file) => {
     });
 };
 
-const runRecommendations = (useOpenAI = false) => {
+const runRecommendations = (useOpenAI = true) => {
   if (!uploadedFile) return;
 
   const overrides = [];
@@ -371,16 +372,22 @@ const runRecommendations = (useOpenAI = false) => {
     method: "POST",
     body: formData,
   })
-    .then(parseJsonResponse)
+    .then((resp) => {
+      if (!resp.ok) {
+        return { error: `${resp.text().then((r) => r)}` };
+      }
+      return resp.json();
+    })
     .then((data) => {
-      if (data.error) {
+      if (data?.error) {
         setStatus(data.error, true);
         return;
       }
 
       rows = data.rows || [];
       originalScoreEl.textContent = data.original_score?.toFixed(2) ?? "-";
-      recommendedScoreEl.textContent = data.recommended_score?.toFixed(2) ?? "-";
+      recommendedScoreEl.textContent =
+        data.recommended_score?.toFixed(2) ?? "-";
       summaryEl.hidden = false;
 
       renderComponents(data.original_components, data.recommended_components);
@@ -415,7 +422,7 @@ fileInput.addEventListener("change", (event) => {
   loadFile(file);
 });
 
-runBtn.addEventListener("click", () => runRecommendations(false));
+runBtn.addEventListener("click", () => runRecommendations(true));
 runRecipeBtn.addEventListener("click", () => runRecommendations(true));
 
 searchInput.addEventListener("input", render);

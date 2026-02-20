@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import io
 import json
 import os
@@ -16,12 +14,15 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(REPO_ROOT / ".env")
 sys.path.append(str(REPO_ROOT))
 
-import Python as python_module
-from Python import simulated_annealing_fixed_amount
+from recommendation import simulated_annealing_fixed_amount
 
 APP_DIR = Path(__file__).resolve().parent
 default_pool = REPO_ROOT / "data" / "walmart_hei_2020.csv"
-default_pool_path = str(default_pool) if default_pool.exists() else "/Users/jeongwon/Downloads/walmart_hei_2020.csv"
+default_pool_path = (
+    str(default_pool)
+    if default_pool.exists()
+    else "/Users/jeongwon/Downloads/walmart_hei_2020.csv"
+)
 FOOD_POOL_PATH = os.getenv("FOOD_POOL_PATH", default_pool_path)
 NITER_DEFAULT = int(os.getenv("NITER_DEFAULT", "1000"))
 
@@ -62,9 +63,7 @@ def load_food_pool() -> pd.DataFrame:
     if "Product Name" in food_pool.columns and "Image URL" in food_pool.columns:
         image_df = food_pool[["Product Name", "Image URL"]].dropna()
         image_df = image_df[image_df["Image URL"].astype(str).str.len() > 0]
-        _image_url_map = (
-            image_df.groupby("Product Name")["Image URL"].first().to_dict()
-        )
+        _image_url_map = image_df.groupby("Product Name")["Image URL"].first().to_dict()
     else:
         _image_url_map = {}
 
@@ -123,14 +122,7 @@ def select_default_for_product(product_name: str, matches: pd.DataFrame) -> dict
 def get_first_value(matches: pd.DataFrame, col: str) -> str | None:
     if col not in matches.columns:
         return None
-    values = (
-        matches[col]
-        .dropna()
-        .astype(str)
-        .str.strip()
-        .replace("", pd.NA)
-        .dropna()
-    )
+    values = matches[col].dropna().astype(str).str.strip().replace("", pd.NA).dropna()
     if values.empty:
         return None
     return values.iloc[0]
@@ -155,9 +147,15 @@ def get_first_description_pair(matches: pd.DataFrame) -> dict | None:
     }
 
 
-def build_category_options(diet_df: pd.DataFrame, food_pool: pd.DataFrame) -> list[dict]:
+def build_category_options(
+    diet_df: pd.DataFrame, food_pool: pd.DataFrame
+) -> list[dict]:
     options_payload = []
-    pool_names = food_pool["Product Name"].astype(str) if "Product Name" in food_pool.columns else pd.Series([], dtype=str)
+    pool_names = (
+        food_pool["Product Name"].astype(str)
+        if "Product Name" in food_pool.columns
+        else pd.Series([], dtype=str)
+    )
 
     for idx, row in diet_df.iterrows():
         product_name = str(row.get("Product Name", "")).strip()
@@ -172,7 +170,9 @@ def build_category_options(diet_df: pd.DataFrame, food_pool: pd.DataFrame) -> li
             )
             continue
 
-        matches = food_pool[pool_names.str.contains(product_name, case=False, na=False, regex=False)]
+        matches = food_pool[
+            pool_names.str.contains(product_name, case=False, na=False, regex=False)
+        ]
         options = []
         for col in DISPLAY_ORDER:
             if col == "DESCRIPTION":
@@ -198,11 +198,20 @@ def build_category_options(diet_df: pd.DataFrame, food_pool: pd.DataFrame) -> li
     return options_payload
 
 
-def ensure_recommendation_hierarchy(diet_df: pd.DataFrame, food_pool: pd.DataFrame) -> pd.DataFrame:
+def ensure_recommendation_hierarchy(
+    diet_df: pd.DataFrame, food_pool: pd.DataFrame
+) -> pd.DataFrame:
     if "Recommendation_Hierarchy" not in diet_df.columns:
         diet_df["Recommendation_Hierarchy"] = ""
 
-    pool_names = food_pool["Product Name"].astype(str) if "Product Name" in food_pool.columns else pd.Series([], dtype=str)
+    pool_names = (
+        food_pool["Product Name"].astype(str)
+        if "Product Name" in food_pool.columns
+        else pd.Series([], dtype=str)
+    )
+
+    # Collect updates to apply in batch to avoid DataFrame fragmentation
+    updates_by_col: dict[str, dict[int, str]] = {}
 
     for idx, row in diet_df.iterrows():
         if str(row.get("Recommendation_Hierarchy", "")).strip():
@@ -210,7 +219,9 @@ def ensure_recommendation_hierarchy(diet_df: pd.DataFrame, food_pool: pd.DataFra
         product_name = str(row.get("Product Name", "")).strip()
         if not product_name:
             continue
-        matches = food_pool[pool_names.str.contains(product_name, case=False, na=False, regex=False)]
+        matches = food_pool[
+            pool_names.str.contains(product_name, case=False, na=False, regex=False)
+        ]
         if matches.empty:
             continue
         default_choice = select_default_for_product(product_name, matches)
@@ -219,18 +230,33 @@ def ensure_recommendation_hierarchy(diet_df: pd.DataFrame, food_pool: pd.DataFra
         column = default_choice["column"]
         value = default_choice["value"]
         description = default_choice.get("description", "")
-        if column not in diet_df.columns:
-            diet_df[column] = ""
-        diet_df.at[idx, column] = value
-        diet_df.at[idx, "Recommendation_Hierarchy"] = column
+
+        # Queue updates
+        updates_by_col.setdefault(column, {})[int(idx)] = value
+        updates_by_col.setdefault("Recommendation_Hierarchy", {})[int(idx)] = column
         if column == "FOODCODE" and description:
-            if "DESCRIPTION" not in diet_df.columns:
-                diet_df["DESCRIPTION"] = ""
-            diet_df.at[idx, "DESCRIPTION"] = description
+            updates_by_col.setdefault("DESCRIPTION", {})[int(idx)] = description
+
+    if not updates_by_col:
+        return diet_df
+
+    # Ensure any new columns exist in one shot with empty-string defaults
+    needed_cols = set(updates_by_col.keys()) - set(diet_df.columns)
+    if needed_cols:
+        add_df = pd.DataFrame({c: "" for c in needed_cols}, index=diet_df.index)
+        diet_df = pd.concat([diet_df, add_df], axis=1)
+
+    # Apply column-wise assignments using aligned Series
+    for col, idxvals in updates_by_col.items():
+        s = pd.Series(idxvals)
+        diet_df.loc[s.index, col] = s.values
+
     return diet_df
 
 
-def enrich_diet_with_pool(diet_df: pd.DataFrame, food_pool: pd.DataFrame) -> pd.DataFrame:
+def enrich_diet_with_pool(
+    diet_df: pd.DataFrame, food_pool: pd.DataFrame
+) -> pd.DataFrame:
     if "Product Name" not in diet_df.columns or "Product Name" not in food_pool.columns:
         return diet_df
 
@@ -268,7 +294,9 @@ def enrich_diet_with_pool(diet_df: pd.DataFrame, food_pool: pd.DataFrame) -> pd.
                 name = str(row.get("Product Name", "")).strip()
                 if not name:
                     continue
-                matches = pool[pool_names.str.contains(name, case=False, na=False, regex=False)]
+                matches = pool[
+                    pool_names.str.contains(name, case=False, na=False, regex=False)
+                ]
                 if matches.empty:
                     continue
                 match_row = matches.iloc[0]
@@ -314,6 +342,8 @@ def recommend():
         except json.JSONDecodeError:
             overrides = []
 
+        # Batch-apply overrides to avoid per-cell fragmentation
+        updates_by_col: dict[str, dict[int, str]] = {}
         for override in overrides:
             idx = int(override.get("index"))
             column = str(override.get("column", "")).strip()
@@ -321,14 +351,20 @@ def recommend():
             description = str(override.get("description", "")).strip()
             if not column or not value:
                 continue
-            if column not in diet_df.columns:
-                diet_df[column] = ""
-            diet_df.at[idx, column] = value
-            diet_df.at[idx, "Recommendation_Hierarchy"] = column
+            updates_by_col.setdefault(column, {})[idx] = value
+            updates_by_col.setdefault("Recommendation_Hierarchy", {})[idx] = column
             if column == "FOODCODE" and description:
-                if "DESCRIPTION" not in diet_df.columns:
-                    diet_df["DESCRIPTION"] = ""
-                diet_df.at[idx, "DESCRIPTION"] = description
+                updates_by_col.setdefault("DESCRIPTION", {})[idx] = description
+
+        if updates_by_col:
+            needed_cols = set(updates_by_col.keys()) - set(diet_df.columns)
+            if needed_cols:
+                add_df = pd.DataFrame({c: "" for c in needed_cols}, index=diet_df.index)
+                diet_df = pd.concat([diet_df, add_df], axis=1)
+
+            for col, idxvals in updates_by_col.items():
+                s = pd.Series(idxvals)
+                diet_df.loc[s.index, col] = s.values
 
     niter = request.form.get("niter", str(NITER_DEFAULT))
     try:
@@ -336,25 +372,25 @@ def recommend():
     except ValueError:
         niter = NITER_DEFAULT
 
-    use_openai = request.form.get("use_openai", "").lower() in {"1", "true", "yes"}
     openai_key = os.getenv("OPENAI_API_KEY", "")
-    if not openai_key:
-        openai_key = getattr(python_module, "OPENAI_API_KEY", "")
-
     diet_df = enrich_diet_with_pool(diet_df, food_pool)
     diet_df = ensure_recommendation_hierarchy(diet_df, food_pool)
 
-    if use_openai and not openai_key:
+    if not openai_key:
         return jsonify({"error": "OPENAI_API_KEY is not set."}), 400
 
     result = simulated_annealing_fixed_amount(
         diet_df,
         food_pool,
         niter=niter,
-        use_openai=use_openai,
+        use_openai=True,
         openai_api_key=openai_key,
     )
-    best_table = attach_images(result["best_diet_table"])
+
+    best_table = attach_images(result["best_diet_table"]).copy()
+
+    # Ensure there are no NaN values in JSON/CSV outputs
+    best_table = best_table.fillna("")
 
     csv_buffer = io.StringIO()
     best_table.to_csv(csv_buffer, index=False)
