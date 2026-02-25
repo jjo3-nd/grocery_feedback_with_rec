@@ -340,7 +340,9 @@ def get_standardized_size(row):
         return val, "discrete"
 
 
-def get_recipe_and_ingredients_from_gpt(current_items_list, valid_categories, api_key):
+def get_recipe_and_ingredients_from_gpt(
+    current_items_list, valid_categories, api_key, cuisine_preference=""
+):
     """
     valid_categories: unique values in Level_2_Category
     """
@@ -358,10 +360,20 @@ def get_recipe_and_ingredients_from_gpt(current_items_list, valid_categories, ap
         "When suggesting ingredients, prefer widely available grocery items; keep names concise (product + brand, no sizes)."
     )
 
+    cuisine_line = ""
+    cuisine_guidance = ""
+    if cuisine_preference:
+        cuisine_line = f"- Preferred cuisine: {cuisine_preference}\n"
+        cuisine_guidance = (
+            "- If a preferred cuisine is provided, align the recipe flavor profile, "
+            "staples, and seasonings with that cuisine while still optimizing HEI.\n"
+        )
+
     user_msg = (
         "Context\n"
         f"- Current purchased items (cart): {current_items_list}\n"
         f"- Valid categories (Level_2_Category enum): {valid_categories}\n\n"
+        f"{cuisine_line}\n"
         "Objective\n"
         "- Propose one healthy, realistic recipe that best improves the overall HEI profile given what is already in the cart, "
         "and list up to 4 missing ingredients to add.\n\n"
@@ -369,6 +381,7 @@ def get_recipe_and_ingredients_from_gpt(current_items_list, valid_categories, ap
         "- Select a single recipe that uses several items from the current cart when possible, improves HEI components, and avoids exotic-only items.\n"
         "- For each missing ingredient: choose the category strictly from the provided enum; never invent new categories.\n"
         "- Provide concise cooking instructions: 3–6 short steps, everyday techniques.\n\n"
+        f"{cuisine_guidance}"
         "Decision Policy (apply silently)\n"
         "- If vegetables/greens-and-beans are low: prefer dark green vegetables or legumes.\n"
         "- If whole grains are low: use whole grains for the base.\n"
@@ -446,6 +459,82 @@ def get_recipe_and_ingredients_from_gpt(current_items_list, valid_categories, ap
         return None, []
 
 
+def get_recommendation_reasons_from_gpt(recommendations, api_key):
+    """
+    recommendations: list of dicts with index, original, recommended, category, price info
+    returns dict index -> reason
+    """
+    if not recommendations:
+        return {}
+
+    client = OpenAI(api_key=api_key)
+
+    system_msg = (
+        "You are a registered-dietitian-style assistant. Provide short, specific reasons "
+        "why a recommended product is a healthier swap. Avoid medical advice or diagnoses. "
+        "Use 1 sentence per item, 18 words max. If the recommended product is the same as "
+        "the original, say it's already a good choice for HEI balance."
+    )
+
+    user_msg = (
+        "Provide a reason for each recommendation.\n"
+        "Return JSON that matches the schema.\n\n"
+        f"Recommendations: {json.dumps(recommendations)}"
+    )
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-5-mini",
+            messages=[
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": user_msg},
+            ],
+            response_format={
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "recommendation_reasons",
+                    "strict": True,
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "reasons": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "index": {"type": "integer"},
+                                        "reason": {"type": "string"},
+                                    },
+                                    "required": ["index", "reason"],
+                                    "additionalProperties": False,
+                                },
+                            }
+                        },
+                        "required": ["reasons"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+        )
+
+        content = response.choices[0].message.content
+        if not content:
+            raise Exception("failed to get response")
+
+        data = json.loads(content)
+        reasons = {}
+        for item in data.get("reasons", []):
+            idx = item.get("index")
+            reason = item.get("reason", "")
+            if idx is None:
+                continue
+            reasons[int(idx)] = reason
+        return reasons
+    except Exception as e:
+        print(f"Error calling OpenAI for reasons: {e}")
+        return {}
+
+
 def find_best_match_in_pool(ingredient_info, food_pool, current_diet):
     # 1. Filter by Category -> 2. Search by Name -> 3. HEI optimization among candidates
     ingredient_name = ingredient_info.get("name", "")
@@ -515,6 +604,7 @@ def simulated_annealing_fixed_amount(
     temp0=500,
     use_openai=False,
     openai_api_key="",
+    cuisine_preference="",
 ):
     if len(target_hiearchy_level_defined) != 0:
         if target_hiearchy_level_defined == "FOODCODE":
@@ -748,7 +838,10 @@ def simulated_annealing_fixed_amount(
         current_items = optimized_base_diet["Product Name"].tolist()
 
         recipe_data, missing_ingredients = get_recipe_and_ingredients_from_gpt(
-            current_items, valid_categories, openai_api_key
+            current_items,
+            valid_categories,
+            openai_api_key,
+            cuisine_preference=cuisine_preference,
         )
 
         # Start Phase 3 with the optimized base diet
@@ -841,6 +934,29 @@ def simulated_annealing_fixed_amount(
             orig_hierarchy + ["Level_2_Category"] * ai_added_len
         )
 
+    recommendation_reasons = {}
+    if use_openai and openai_api_key:
+        rec_payload = []
+        for idx, row in final_table.reset_index(drop=True).iterrows():
+            rec_payload.append(
+                {
+                    "index": int(idx),
+                    "original": str(row.get("Original_Food", "")).strip(),
+                    "recommended": str(row.get("New_Food", "")).strip(),
+                    "category": str(row.get("Target_Category", "")).strip(),
+                    "original_price": row.get("Original_Price", ""),
+                    "recommended_price": row.get("New_Price", ""),
+                }
+            )
+        recommendation_reasons = get_recommendation_reasons_from_gpt(
+            rec_payload, openai_api_key
+        )
+        if recommendation_reasons:
+            final_table["Recommendation_Reason"] = [
+                recommendation_reasons.get(i, "")
+                for i in range(len(final_table))
+            ]
+
     # Fill text fields safely; coerce NaN to friendly strings for API/CSV
     obj_cols = final_table.select_dtypes(include=["object"]).columns
     final_table[obj_cols] = final_table[obj_cols].fillna("")
@@ -866,14 +982,24 @@ def simulated_annealing_fixed_amount(
 
 
 def run_recommendation(
-    diet_path, food_pool_path, niter=1000, use_openai=False, openai_api_key=""
+    diet_path,
+    food_pool_path,
+    niter=1000,
+    use_openai=False,
+    openai_api_key="",
+    cuisine_preference="",
 ):
     diet_data = pd.read_csv(diet_path)
     food_pool = pd.read_csv(food_pool_path)
     api_key = openai_api_key or OPENAI_API_KEY
 
     result = simulated_annealing_fixed_amount(
-        diet_data, food_pool, niter=niter, use_openai=use_openai, openai_api_key=api_key
+        diet_data,
+        food_pool,
+        niter=niter,
+        use_openai=use_openai,
+        openai_api_key=api_key,
+        cuisine_preference=cuisine_preference,
     )
     return result
 

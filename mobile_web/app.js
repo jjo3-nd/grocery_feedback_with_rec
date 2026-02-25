@@ -16,6 +16,7 @@ const recipeEl = document.getElementById("recipe");
 const recipeNameEl = document.getElementById("recipeName");
 const recipeInstructionsEl = document.getElementById("recipeInstructions");
 const recipeIngredientsEl = document.getElementById("recipeIngredients");
+const cuisineInputs = document.querySelectorAll("input[name='cuisine']");
 
 let rows = [];
 let uploadedFile = null;
@@ -96,6 +97,11 @@ const setStatus = (message, isError = false) => {
   statusEl.style.color = isError ? "#b44b3d" : "";
 };
 
+const getSelectedCuisine = () => {
+  const selected = Array.from(cuisineInputs).find((input) => input.checked);
+  return selected?.value || "";
+};
+
 const safeImage = (url, alt) => {
   if (!url) return "";
   return `<img src="${url}" alt="${alt}" />`;
@@ -145,6 +151,10 @@ const renderPaired = (filtered) => {
     const recommendationPill = showRecommended
       ? `<span class="card__pill">New: ${formatPrice(row.New_Price)}</span>`
       : `<span class="card__pill">This was a good choice!</span>`;
+    const reasonText = row.Recommendation_Reason || "";
+    const reasonBlock = reasonText
+      ? `<div class="card__reason"><span class="reason-badge">Reason</span><span>${reasonText}</span></div>`
+      : "";
 
     card.innerHTML = `
       <div class="card__pair">
@@ -162,19 +172,29 @@ const renderPaired = (filtered) => {
         <span class="card__pill">Original: ${formatPrice(row.Original_Price)}</span>
         ${recommendationPill}
       </div>
+      ${reasonBlock}
     `;
     results.appendChild(card);
   });
 };
 
+const buildSearchIndex = (row) => {
+  const values = Object.values(row || {})
+    .map((val) => {
+      if (val === null || val === undefined) return "";
+      if (typeof val === "string") return val;
+      if (typeof val === "number") return String(val);
+      return "";
+    })
+    .join(" ");
+  return values.toLowerCase();
+};
+
 const render = () => {
   const query = searchInput.value.trim().toLowerCase();
   const filtered = rows.filter((row) => {
-    return (
-      row.Original_Food?.toLowerCase().includes(query) ||
-      row.New_Food?.toLowerCase().includes(query) ||
-      row.Target_Category?.toLowerCase().includes(query)
-    );
+    if (!query) return true;
+    return (row._search || "").includes(query);
   });
 
   renderPaired(filtered);
@@ -253,7 +273,17 @@ const renderRecipe = (recipeData, recipeInfo) => {
   if (recipeData) {
     recipeNameEl.textContent = recipeData.recipe_name || "";
     const instructions = recipeData.instructions || "";
-    recipeInstructionsEl.textContent = instructions.replace(/\\n/g, "\n");
+    const steps = instructions
+      .split(/\n+/)
+      .map((line) => line.replace(/^\s*[-*\d.)]+\s*/, "").trim())
+      .filter((line) => line.length);
+    if (steps.length) {
+      recipeInstructionsEl.innerHTML = `<ol>${steps
+        .map((step) => `<li>${step}</li>`)
+        .join("")}</ol>`;
+    } else {
+      recipeInstructionsEl.textContent = instructions.replace(/\\n/g, "\n");
+    }
     recipeIngredientsEl.innerHTML = "";
     (recipeData.missing_ingredients || []).forEach((item) => {
       const li = document.createElement("li");
@@ -358,6 +388,10 @@ const runRecommendations = (useOpenAI = true) => {
 
   const formData = new FormData();
   formData.append("diet", uploadedFile);
+  const cuisine = getSelectedCuisine();
+  if (cuisine) {
+    formData.append("cuisine", cuisine);
+  }
   if (overrides.length) {
     formData.append("overrides", JSON.stringify(overrides));
   }
@@ -384,7 +418,10 @@ const runRecommendations = (useOpenAI = true) => {
         return;
       }
 
-      rows = data.rows || [];
+      rows = (data.rows || []).map((row) => ({
+        ...row,
+        _search: buildSearchIndex(row),
+      }));
       originalScoreEl.textContent = data.original_score?.toFixed(2) ?? "-";
       recommendedScoreEl.textContent =
         data.recommended_score?.toFixed(2) ?? "-";

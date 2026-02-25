@@ -9,11 +9,13 @@
   <body>
     <header class="hero">
       <div class="hero__content">
-        <p class="eyebrow">HEI Optimizer</p>
-        <h1>Original products and healthier swaps</h1>
+        <p class="eyebrow">Grocery Feedback</p>
+        <h1 class="hero-title">
+          HEI Optimizer: smarter swaps, healthier baskets
+        </h1>
         <p class="subhead">
-          Upload your <span class="mono">recommended_diet.csv</span> and browse the
-          original items next to their recommended replacements.
+          Upload your <span class="mono">recommended_diet.csv</span> to compare
+          originals with healthier replacements and see your HEI score jump.
         </p>
       </div>
     </header>
@@ -29,6 +31,54 @@
           <div>
             <p class="uploader__title">Drop cart CSV here or tap to choose</p>
             <p class="muted">Runs the HEI optimizer and returns recommendations.</p>
+          </div>
+        </div>
+        <div class="cuisine-panel">
+          <div>
+            <h3>Choose a cuisine</h3>
+            <p class="muted">Optional: we’ll nudge recipe suggestions toward your pick.</p>
+          </div>
+          <div class="cuisine-options" role="radiogroup" aria-label="Cuisine preference">
+            <label class="cuisine-chip">
+              <input type="radio" name="cuisine" value="" checked />
+              <span>No preference</span>
+            </label>
+            <label class="cuisine-chip">
+              <input type="radio" name="cuisine" value="Mexican" />
+              <span>Mexican</span>
+            </label>
+            <label class="cuisine-chip">
+              <input type="radio" name="cuisine" value="Chinese" />
+              <span>Chinese</span>
+            </label>
+            <label class="cuisine-chip">
+              <input type="radio" name="cuisine" value="Korean" />
+              <span>Korean</span>
+            </label>
+            <label class="cuisine-chip">
+              <input type="radio" name="cuisine" value="Japanese" />
+              <span>Japanese</span>
+            </label>
+            <label class="cuisine-chip">
+              <input type="radio" name="cuisine" value="Thai" />
+              <span>Thai</span>
+            </label>
+            <label class="cuisine-chip">
+              <input type="radio" name="cuisine" value="Mediterranean" />
+              <span>Mediterranean</span>
+            </label>
+            <label class="cuisine-chip">
+              <input type="radio" name="cuisine" value="Indian" />
+              <span>Indian</span>
+            </label>
+            <label class="cuisine-chip">
+              <input type="radio" name="cuisine" value="American" />
+              <span>American</span>
+            </label>
+            <label class="cuisine-chip">
+              <input type="radio" name="cuisine" value="African" />
+              <span>African</span>
+            </label>
           </div>
         </div>
         <div class="category-panel" id="categoryPanel" hidden>

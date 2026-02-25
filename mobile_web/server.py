@@ -371,6 +371,7 @@ def recommend():
         niter = int(niter)
     except ValueError:
         niter = NITER_DEFAULT
+    cuisine = request.form.get("cuisine", "").strip()
 
     openai_key = os.getenv("OPENAI_API_KEY", "")
     diet_df = enrich_diet_with_pool(diet_df, food_pool)
@@ -385,6 +386,7 @@ def recommend():
         niter=niter,
         use_openai=True,
         openai_api_key=openai_key,
+        cuisine_preference=cuisine,
     )
 
     best_table = attach_images(result["best_diet_table"]).copy()
