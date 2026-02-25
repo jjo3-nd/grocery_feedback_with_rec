@@ -18,11 +18,7 @@ from recommendation import simulated_annealing_fixed_amount
 
 APP_DIR = Path(__file__).resolve().parent
 default_pool = REPO_ROOT / "data" / "walmart_hei_2020.csv"
-default_pool_path = (
-    str(default_pool)
-    if default_pool.exists()
-    else "/Users/jeongwon/Downloads/walmart_hei_2020.csv"
-)
+default_pool_path = str(default_pool)
 FOOD_POOL_PATH = os.getenv("FOOD_POOL_PATH", default_pool_path)
 NITER_DEFAULT = int(os.getenv("NITER_DEFAULT", "1000"))
 

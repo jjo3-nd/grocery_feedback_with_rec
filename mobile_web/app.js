@@ -107,6 +107,21 @@ const safeImage = (url, alt) => {
   return `<img src="${url}" alt="${alt}" />`;
 };
 
+const normalizeInstructionText = (text) => {
+  if (!text) return "";
+  let normalized = text.replace(/\\n/g, "\n");
+  const hasNewlines = /\r?\n/.test(normalized);
+  const hasNumbered = /\b\d+[.)]\s+/.test(normalized);
+  if (!hasNewlines && hasNumbered) {
+    normalized = normalized.replace(/\s*(\d+[.)]\s+)/g, "\n$1").trim();
+  }
+  return normalized;
+};
+
+const renderMarkdownToHtml = (markdown) => {
+  return window.marked.parse(markdown, { mangle: false, headerIds: false });
+};
+
 const formatPrice = (value) => {
   const num = Number(value);
   if (Number.isFinite(num)) {
@@ -272,18 +287,8 @@ const renderRecipe = (recipeData, recipeInfo) => {
 
   if (recipeData) {
     recipeNameEl.textContent = recipeData.recipe_name || "";
-    const instructions = recipeData.instructions || "";
-    const steps = instructions
-      .split(/\n+/)
-      .map((line) => line.replace(/^\s*[-*\d.)]+\s*/, "").trim())
-      .filter((line) => line.length);
-    if (steps.length) {
-      recipeInstructionsEl.innerHTML = `<ol>${steps
-        .map((step) => `<li>${step}</li>`)
-        .join("")}</ol>`;
-    } else {
-      recipeInstructionsEl.textContent = instructions.replace(/\\n/g, "\n");
-    }
+    const instructions = normalizeInstructionText(recipeData.instructions || "");
+    recipeInstructionsEl.innerHTML = renderMarkdownToHtml(instructions);
     recipeIngredientsEl.innerHTML = "";
     (recipeData.missing_ingredients || []).forEach((item) => {
       const li = document.createElement("li");
@@ -292,7 +297,9 @@ const renderRecipe = (recipeData, recipeInfo) => {
     });
   } else {
     recipeNameEl.textContent = "";
-    recipeInstructionsEl.textContent = recipeInfo || "";
+    recipeInstructionsEl.innerHTML = renderMarkdownToHtml(
+      normalizeInstructionText(recipeInfo || ""),
+    );
     recipeIngredientsEl.innerHTML = "";
   }
 
