@@ -20,6 +20,7 @@ const cuisineInputs = document.querySelectorAll("input[name='cuisine']");
 
 let rows = [];
 let uploadedFile = null;
+let overallHeiDelta = null;
 
 const COMPONENT_LABELS = {
   HEI2015C1_TOTALVEG: "Vegetables",
@@ -98,8 +99,12 @@ const setStatus = (message, isError = false) => {
 };
 
 const getSelectedCuisine = () => {
-  const selected = Array.from(cuisineInputs).find((input) => input.checked);
-  return selected?.value || "";
+  const selected = Array.from(cuisineInputs)
+    .filter((input) => input.checked)
+    .map((input) => input.value);
+  const hasNoPreference = selected.includes("No preference");
+  const cleaned = hasNoPreference ? [] : selected;
+  return cleaned.join(", ");
 };
 
 const safeImage = (url, alt) => {
@@ -128,6 +133,13 @@ const formatPrice = (value) => {
     return `$${num.toFixed(2)}`;
   }
   return value || "-";
+};
+
+const formatDelta = (value, suffix = "") => {
+  if (!Number.isFinite(value)) return "-";
+  const sign = value > 0 ? "+" : value < 0 ? "−" : "";
+  const absVal = Math.abs(value);
+  return `${sign}${absVal.toFixed(2)}${suffix}`;
 };
 
 const renderPaired = (filtered) => {
@@ -171,7 +183,35 @@ const renderPaired = (filtered) => {
       ? `<div class="card__reason"><span class="reason-badge">Reason</span><span>${reasonText}</span></div>`
       : "";
 
+    const originalPrice = Number(row.Original_Price);
+    const newPrice = Number(row.New_Price);
+    const priceDelta = Number.isFinite(originalPrice) && Number.isFinite(newPrice)
+      ? newPrice - originalPrice
+      : null;
+    const priceDeltaText = priceDelta === null ? "-" : formatDelta(priceDelta);
+    const heiDeltaText =
+      overallHeiDelta === null ? "-" : formatDelta(overallHeiDelta, " HEI");
+    const summaryBadge =
+      overallHeiDelta && overallHeiDelta > 0
+        ? "Healthier"
+        : overallHeiDelta && overallHeiDelta < 0
+          ? "Less healthy"
+          : "Neutral";
+    const summaryClass =
+      overallHeiDelta && overallHeiDelta > 0
+        ? "summary-badge--good"
+        : overallHeiDelta && overallHeiDelta < 0
+          ? "summary-badge--bad"
+          : "summary-badge--neutral";
+
     card.innerHTML = `
+      <div class="card__summary">
+        <span class="summary-badge ${summaryClass}">${summaryBadge}</span>
+        <div class="summary-metrics">
+          <span class="metric ${priceDelta !== null && priceDelta < 0 ? "metric--good" : ""}">${priceDeltaText}</span>
+          <span class="metric ${overallHeiDelta !== null && overallHeiDelta > 0 ? "metric--good" : ""}">${heiDeltaText}</span>
+        </div>
+      </div>
       <div class="card__pair">
         <div class="card__item">
           ${safeImage(row.Original_Image_URL, row.Original_Food || "Original product")}
@@ -429,6 +469,14 @@ const runRecommendations = (useOpenAI = true) => {
         ...row,
         _search: buildSearchIndex(row),
       }));
+      if (
+        Number.isFinite(data.original_score) &&
+        Number.isFinite(data.recommended_score)
+      ) {
+        overallHeiDelta = data.recommended_score - data.original_score;
+      } else {
+        overallHeiDelta = null;
+      }
       originalScoreEl.textContent = data.original_score?.toFixed(2) ?? "-";
       recommendedScoreEl.textContent =
         data.recommended_score?.toFixed(2) ?? "-";
@@ -454,6 +502,7 @@ const loadFile = (file) => {
   if (!file) return;
   uploadedFile = file;
   rows = [];
+  overallHeiDelta = null;
   results.innerHTML = "";
   summaryEl.hidden = true;
   componentsEl.hidden = true;
@@ -465,6 +514,31 @@ fileInput.addEventListener("change", (event) => {
   const file = event.target.files[0];
   loadFile(file);
 });
+
+const noPreferenceInput = Array.from(cuisineInputs).find(
+  (input) => input.value === "No preference",
+);
+const cuisineInputsExceptNone = Array.from(cuisineInputs).filter(
+  (input) => input.value !== "No preference",
+);
+
+cuisineInputsExceptNone.forEach((input) => {
+  input.addEventListener("change", () => {
+    if (input.checked && noPreferenceInput) {
+      noPreferenceInput.checked = false;
+    }
+  });
+});
+
+if (noPreferenceInput) {
+  noPreferenceInput.addEventListener("change", () => {
+    if (noPreferenceInput.checked) {
+      cuisineInputsExceptNone.forEach((input) => {
+        input.checked = false;
+      });
+    }
+  });
+}
 
 runBtn.addEventListener("click", () => runRecommendations(true));
 runRecipeBtn.addEventListener("click", () => runRecommendations(true));
