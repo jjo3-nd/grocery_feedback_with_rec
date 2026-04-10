@@ -6,7 +6,6 @@ const statusEl = document.getElementById("status");
 const summaryEl = document.getElementById("summary");
 const originalScoreEl = document.getElementById("originalScore");
 const recommendedScoreEl = document.getElementById("recommendedScore");
-const downloadLink = document.getElementById("downloadLink");
 const categoryPanel = document.getElementById("categoryPanel");
 const categoryList = document.getElementById("categoryList");
 const runBtn = document.getElementById("runBtn");
@@ -107,8 +106,19 @@ const getSelectedCuisine = () => {
   return cleaned.join(", ");
 };
 
+const hasImageUrl = (url) => {
+  const normalized = String(url || "").trim().toLowerCase();
+  return Boolean(
+    normalized &&
+      normalized !== "nan" &&
+      normalized !== "null" &&
+      normalized !== "none" &&
+      normalized !== "n/a",
+  );
+};
+
 const safeImage = (url, alt) => {
-  if (!url) return "";
+  if (!hasImageUrl(url)) return "";
   return `<img src="${url}" alt="${alt}" />`;
 };
 
@@ -142,6 +152,60 @@ const formatDelta = (value, suffix = "") => {
   return `${sign}${absVal.toFixed(2)}${suffix}`;
 };
 
+const isIngredientInBasket = (ingredientName) => {
+  const name = (ingredientName || "").trim().toLowerCase();
+  if (!name) return false;
+  return rows.some((row) => {
+    const original = (row.Original_Food || "").replace(/^AI Rec:\s*/i, "").trim().toLowerCase();
+    const recommended = (row.New_Food || "").trim().toLowerCase();
+    return original === name || recommended === name;
+  });
+};
+
+const addIngredientToBasket = (ingredientName) => {
+  const name = (ingredientName || "").trim();
+  if (!name) return;
+
+  const duplicate = isIngredientInBasket(name);
+
+  if (duplicate) {
+    setStatus(`"${name}" is already in your grocery basket.`);
+    return;
+  }
+
+  const basketRow = {
+    Original_Food: `AI Rec: ${name}`,
+    Original_Image_URL: "",
+    Original_Price: "",
+    New_Food: name,
+    New_Image_URL: "",
+    New_Price: "",
+    Target_Category: "Recipe ingredient",
+    Recommendation_Reason: "Added from missing recipe ingredients.",
+  };
+  basketRow._search = buildSearchIndex(basketRow);
+
+  rows.push(basketRow);
+  setStatus(`Added "${name}" to your grocery basket.`);
+  render();
+};
+
+const removeIngredientFromBasket = (ingredientName) => {
+  const name = (ingredientName || "").trim().toLowerCase();
+  if (!name) return false;
+
+  const originalLength = rows.length;
+  rows = rows.filter((row) => {
+    const original = (row.Original_Food || "").replace(/^AI Rec:\s*/i, "").trim().toLowerCase();
+    const recommended = (row.New_Food || "").trim().toLowerCase();
+    return original !== name && recommended !== name;
+  });
+
+  if (rows.length === originalLength) return false;
+  render();
+  return true;
+};
+
 const renderPaired = (filtered) => {
   results.innerHTML = "";
   filtered.forEach((row) => {
@@ -163,9 +227,12 @@ const renderPaired = (filtered) => {
       normalizedOriginal === normalizedNew;
     const showRecommended = !isSameProduct;
 
+    const hasRecommendedImage = hasImageUrl(row.New_Image_URL);
+    const hasOriginalImage = hasImageUrl(row.Original_Image_URL);
+
     const recommendedBlock = showRecommended
       ? `
-        <div class="card__item">
+        <div class="card__item ${hasRecommendedImage ? "" : "card__item--no-image"}">
           ${safeImage(row.New_Image_URL, row.New_Food || "Recommended product")}
           <div>
             <span class="card__label">Recommended</span>
@@ -213,7 +280,7 @@ const renderPaired = (filtered) => {
         </div>
       </div>
       <div class="card__pair">
-        <div class="card__item">
+        <div class="card__item ${hasOriginalImage ? "" : "card__item--no-image"}">
           ${safeImage(row.Original_Image_URL, row.Original_Food || "Original product")}
           <div>
             <span class="card__label">${originalLabel}</span>
@@ -332,7 +399,37 @@ const renderRecipe = (recipeData, recipeInfo) => {
     recipeIngredientsEl.innerHTML = "";
     (recipeData.missing_ingredients || []).forEach((item) => {
       const li = document.createElement("li");
-      li.textContent = item.name || "Ingredient";
+      li.className = "recipe-ingredient";
+
+      const name = item.name || "Ingredient";
+      const nameSpan = document.createElement("span");
+      nameSpan.textContent = name;
+
+      const addBtn = document.createElement("button");
+      addBtn.type = "button";
+      addBtn.className = "ingredient-add-btn";
+      const syncButtonState = () => {
+        const isAdded = isIngredientInBasket(name);
+        addBtn.textContent = isAdded ? "Remove" : "Add";
+        addBtn.classList.toggle("ingredient-remove-btn", isAdded);
+      };
+      syncButtonState();
+      addBtn.addEventListener("click", () => {
+        if (isIngredientInBasket(name)) {
+          const removed = removeIngredientFromBasket(name);
+          if (removed) {
+            setStatus(`Removed "${name}" from your grocery basket.`);
+          } else {
+            setStatus(`"${name}" was not in your grocery basket.`);
+          }
+        } else {
+          addIngredientToBasket(name);
+        }
+        syncButtonState();
+      });
+
+      li.appendChild(nameSpan);
+      li.appendChild(addBtn);
       recipeIngredientsEl.appendChild(li);
     });
   } else {
@@ -477,18 +574,19 @@ const runRecommendations = (useOpenAI = true) => {
       } else {
         overallHeiDelta = null;
       }
-      originalScoreEl.textContent = data.original_score?.toFixed(2) ?? "-";
-      recommendedScoreEl.textContent =
-        data.recommended_score?.toFixed(2) ?? "-";
+      const hasScores =
+        Number.isFinite(data.original_score) &&
+        Number.isFinite(data.recommended_score);
+      originalScoreEl.textContent = hasScores
+        ? data.original_score.toFixed(2)
+        : "-";
+      recommendedScoreEl.textContent = hasScores
+        ? data.recommended_score.toFixed(2)
+        : "-";
       summaryEl.hidden = false;
 
       renderComponents(data.original_components, data.recommended_components);
       renderRecipe(data.recipe_data, data.recipe_info);
-
-      if (data.csv) {
-        const blob = new Blob([data.csv], { type: "text/csv" });
-        downloadLink.href = URL.createObjectURL(blob);
-      }
 
       setStatus(`Loaded ${rows.length} recommendations.`);
       render();
