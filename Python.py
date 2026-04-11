@@ -309,11 +309,19 @@ def find_best_match_in_pool(ingredient_info, food_pool, current_diet):
         else: return None
 
     # 2. Search name among the filtered subset
-    matches = subset[subset['Product Name'].str.contains(ingredient_name, case=False, na=False)]
+    matches = subset[
+        subset['Product Name'].str.contains(
+            ingredient_name, case=False, na=False, regex=False
+        )
+    ]
     if matches.empty:
         words = ingredient_name.split()
         if len(words) > 1:
-            matches = subset[subset['Product Name'].str.contains(words[-1], case=False, na=False)]
+            matches = subset[
+                subset['Product Name'].str.contains(
+                    words[-1], case=False, na=False, regex=False
+                )
+            ]
     if matches.empty: return None
 
     # 3. HEI optimization
@@ -624,7 +632,12 @@ def simulated_annealing_fixed_amount(diet_df, food_pool_df, optimization_mode='h
         orig_hierarchy = diet_df['Recommendation_Hierarchy'].tolist()
         final_table['Target_Hierarchy_Level'] = orig_hierarchy + ["Level_2_Category"] * ai_added_len
         
-    final_table.fillna("Unknown", inplace=True)
+    # Only fill missing values for text-like columns.
+    # Filling numeric float64 columns with strings raises:
+    # "Invalid value 'Unknown' for dtype 'float64'".
+    text_cols = final_table.select_dtypes(include=["object", "string"]).columns
+    if len(text_cols):
+        final_table.loc[:, text_cols] = final_table.loc[:, text_cols].fillna("Unknown")
 
     original_components = extract_hei_components(calculate_hei_scores_wrapper(diet_df))
     recommended_components = extract_hei_components(calculate_hei_scores_wrapper(best_diet))

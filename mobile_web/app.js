@@ -20,6 +20,7 @@ const cuisineInputs = document.querySelectorAll("input[name='cuisine']");
 let rows = [];
 let uploadedFile = null;
 let overallHeiDelta = null;
+let recipeAdditionLookup = {};
 
 const COMPONENT_LABELS = {
   HEI2015C1_TOTALVEG: "Vegetables",
@@ -152,6 +153,86 @@ const formatDelta = (value, suffix = "") => {
   return `${sign}${absVal.toFixed(2)}${suffix}`;
 };
 
+const toSingleSentence = (text) => {
+  const normalized = String(text || "").replace(/\s+/g, " ").trim();
+  if (!normalized) return "";
+  const sentence = normalized.split(/(?<=[.!?])\s+/)[0] || normalized;
+  return /[.!?]$/.test(sentence) ? sentence : `${sentence}.`;
+};
+
+const buildRecommendationReason = (row, showRecommended) => {
+  const provided = toSingleSentence(row?.Recommendation_Reason);
+  if (provided) return provided;
+
+  if (!showRecommended) {
+    return "This product was kept because it already matches the optimization goals.";
+  }
+
+  const originalPrice = Number(row?.Original_Price);
+  const newPrice = Number(row?.New_Price);
+  const hasPriceDelta = Number.isFinite(originalPrice) && Number.isFinite(newPrice);
+  const target = String(row?.Target_Category || "").trim();
+
+  if (hasPriceDelta && newPrice < originalPrice) {
+    return `Recommended to improve your basket while reducing cost${target ? ` in ${target}` : ""}.`;
+  }
+  if (target) {
+    return `Recommended as a better fit for your ${target} target category.`;
+  }
+  return "Recommended because it better aligns with your basket optimization goals.";
+};
+
+const normalizeRecommendRows = (apiRows) => {
+  if (!Array.isArray(apiRows)) return [];
+
+  return apiRows.map((row) => {
+    // New backend format: { original: {...}, options: {...}, target_category: ... }
+    if (row && row.original && row.options) {
+      const preferredOption =
+        row.options.healthiest ||
+        row.options.balanced ||
+        row.options.cheapest ||
+        Object.values(row.options).find((opt) => opt && typeof opt === "object") ||
+        {};
+
+      return {
+        Original_Food: row.original?.name || "",
+        Original_Image_URL: row.original?.image || "",
+        Original_Price: row.original?.price ?? "",
+        New_Food: preferredOption?.name || "",
+        New_Image_URL: preferredOption?.image || "",
+        New_Price: preferredOption?.price ?? "",
+        Target_Category: row.target_category || "",
+        Recommendation_Reason: row.recommendation_reason || "",
+      };
+    }
+
+    // Legacy flat format
+    return row || {};
+  });
+};
+
+const buildRecipeAdditionLookup = (additions) => {
+  const lookup = {};
+  if (!Array.isArray(additions)) return lookup;
+  additions.forEach((item) => {
+    const key = String(item?.ingredient_name || "").trim().toLowerCase();
+    if (!key) return;
+    lookup[key] = {
+      matchedProduct: item?.matched_product || "",
+      matchedPrice: item?.matched_price,
+      matchedImage: item?.matched_image || "",
+    };
+  });
+  return lookup;
+};
+
+const toFiniteNumberOrNull = (value) => {
+  if (value === null || value === undefined || value === "") return null;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+};
+
 const isIngredientInBasket = (ingredientName) => {
   const name = (ingredientName || "").trim().toLowerCase();
   if (!name) return false;
@@ -162,7 +243,9 @@ const isIngredientInBasket = (ingredientName) => {
   });
 };
 
-const addIngredientToBasket = (ingredientName) => {
+const addIngredientToBasket = (ingredientInput) => {
+  const ingredientName =
+    typeof ingredientInput === "string" ? ingredientInput : ingredientInput?.name;
   const name = (ingredientName || "").trim();
   if (!name) return;
 
@@ -173,13 +256,23 @@ const addIngredientToBasket = (ingredientName) => {
     return;
   }
 
+  const recipeMatch = recipeAdditionLookup[name.toLowerCase()] || {};
+  const maybePrice =
+    ingredientInput?.matchedPrice ??
+    ingredientInput?.estimatedPrice ??
+    recipeMatch.matchedPrice;
+  const newPrice = toFiniteNumberOrNull(maybePrice);
+  const newImage = ingredientInput?.matchedImage || recipeMatch.matchedImage || "";
+  const matchedProduct =
+    ingredientInput?.matchedProduct || recipeMatch.matchedProduct || name;
+
   const basketRow = {
     Original_Food: `AI Rec: ${name}`,
     Original_Image_URL: "",
-    Original_Price: "",
-    New_Food: name,
-    New_Image_URL: "",
-    New_Price: "",
+    Original_Price: newPrice === null ? "" : 0,
+    New_Food: matchedProduct,
+    New_Image_URL: newImage,
+    New_Price: newPrice === null ? "" : newPrice,
     Target_Category: "Recipe ingredient",
     Recommendation_Reason: "Added from missing recipe ingredients.",
   };
@@ -242,10 +335,15 @@ const renderPaired = (filtered) => {
       `
       : "";
 
+    const hasBothPrices =
+      Number.isFinite(Number(row.Original_Price)) &&
+      Number.isFinite(Number(row.New_Price));
     const recommendationPill = showRecommended
-      ? `<span class="card__pill">New: ${formatPrice(row.New_Price)}</span>`
+      ? hasBothPrices
+        ? `<span class="card__pill">New price: <span class="price-current">${formatPrice(row.New_Price)}</span> <span class="price-strike">${formatPrice(row.Original_Price)}</span></span>`
+        : `<span class="card__pill">New price: ${formatPrice(row.New_Price)}</span>`
       : `<span class="card__pill">This was a good choice!</span>`;
-    const reasonText = row.Recommendation_Reason || "";
+    const reasonText = buildRecommendationReason(row, showRecommended);
     const reasonBlock = reasonText
       ? `<div class="card__reason"><span class="reason-badge">Reason</span><span>${reasonText}</span></div>`
       : "";
@@ -275,8 +373,14 @@ const renderPaired = (filtered) => {
       <div class="card__summary">
         <span class="summary-badge ${summaryClass}">${summaryBadge}</span>
         <div class="summary-metrics">
-          <span class="metric ${priceDelta !== null && priceDelta < 0 ? "metric--good" : ""}">${priceDeltaText}</span>
-          <span class="metric ${overallHeiDelta !== null && overallHeiDelta > 0 ? "metric--good" : ""}">${heiDeltaText}</span>
+          <span class="metric-item">
+            <span class="metric-label">Price change</span>
+            <span class="metric-value ${priceDelta !== null && priceDelta < 0 ? "metric--good" : ""}">${priceDeltaText}</span>
+          </span>
+          <span class="metric-item">
+            <span class="metric-label">HEI change</span>
+            <span class="metric-value ${overallHeiDelta !== null && overallHeiDelta > 0 ? "metric--good" : ""}">${heiDeltaText}</span>
+          </span>
         </div>
       </div>
       <div class="card__pair">
@@ -291,7 +395,6 @@ const renderPaired = (filtered) => {
       </div>
       <div class="card__meta">
         <span class="card__pill">${row.Target_Category || "Category unknown"}</span>
-        <span class="card__pill">Original: ${formatPrice(row.Original_Price)}</span>
         ${recommendationPill}
       </div>
       ${reasonBlock}
@@ -402,8 +505,20 @@ const renderRecipe = (recipeData, recipeInfo) => {
       li.className = "recipe-ingredient";
 
       const name = item.name || "Ingredient";
+      const recipeMatch = recipeAdditionLookup[String(name).toLowerCase()] || {};
+      const ingredientPayload = {
+        name,
+        matchedProduct: recipeMatch.matchedProduct || name,
+        matchedPrice: recipeMatch.matchedPrice,
+        matchedImage: recipeMatch.matchedImage || "",
+      };
       const nameSpan = document.createElement("span");
-      nameSpan.textContent = name;
+      const previewPrice = toFiniteNumberOrNull(ingredientPayload.matchedPrice);
+      if (previewPrice !== null) {
+        nameSpan.textContent = `${name} (${formatPrice(previewPrice)})`;
+      } else {
+        nameSpan.textContent = name;
+      }
 
       const addBtn = document.createElement("button");
       addBtn.type = "button";
@@ -423,7 +538,7 @@ const renderRecipe = (recipeData, recipeInfo) => {
             setStatus(`"${name}" was not in your grocery basket.`);
           }
         } else {
-          addIngredientToBasket(name);
+          addIngredientToBasket(ingredientPayload);
         }
         syncButtonState();
       });
@@ -446,7 +561,8 @@ const renderRecipe = (recipeData, recipeInfo) => {
 const buildCategoryOptions = (items) => {
   categoryList.innerHTML = "";
 
-  items.forEach((item) => {
+  const safeItems = Array.isArray(items) ? items : [];
+  safeItems.forEach((item) => {
     const row = document.createElement("div");
     row.className = "category-row";
 
@@ -458,7 +574,18 @@ const buildCategoryOptions = (items) => {
     defaultOption.textContent = "Select a category";
     select.appendChild(defaultOption);
 
-    item.options.forEach((option) => {
+    const optionCandidates = Array.isArray(item?.options)
+      ? item.options
+      : Object.entries(item?.values || {})
+          .filter(([, value]) => String(value || "").trim().length > 0)
+          .map(([column, value]) => ({
+            column,
+            value: String(value),
+            description: "",
+            label: `${column}: ${value}`,
+          }));
+
+    optionCandidates.forEach((option) => {
       const opt = document.createElement("option");
       opt.value = JSON.stringify({
         column: option.column,
@@ -468,6 +595,13 @@ const buildCategoryOptions = (items) => {
       opt.textContent = option.label;
       select.appendChild(opt);
     });
+
+    if (optionCandidates.length === 0) {
+      const emptyOpt = document.createElement("option");
+      emptyOpt.value = "";
+      emptyOpt.textContent = "No category matches found";
+      select.appendChild(emptyOpt);
+    }
 
     row.innerHTML = `<strong>${item.product_name}</strong>`;
     row.appendChild(select);
@@ -480,10 +614,21 @@ const buildCategoryOptions = (items) => {
         description: item.default.description || "",
       });
       select.value = targetValue;
+    } else if (
+      Number.isInteger(item.default_index) &&
+      item.default_index >= 0 &&
+      item.default_index < optionCandidates.length
+    ) {
+      const option = optionCandidates[item.default_index];
+      select.value = JSON.stringify({
+        column: option.column,
+        value: option.value,
+        description: option.description || "",
+      });
     }
   });
 
-  categoryPanel.hidden = false;
+  categoryPanel.hidden = safeItems.length === 0;
 };
 
 const fetchOptions = (file) => {
@@ -552,7 +697,9 @@ const runRecommendations = (useOpenAI = true) => {
   })
     .then((resp) => {
       if (!resp.ok) {
-        return { error: `${resp.text().then((r) => r)}` };
+        return resp.text().then((text) => ({
+          error: text || `Request failed (${resp.status})`,
+        }));
       }
       return resp.json();
     })
@@ -562,26 +709,35 @@ const runRecommendations = (useOpenAI = true) => {
         return;
       }
 
-      rows = (data.rows || []).map((row) => ({
+      const normalizedRows = normalizeRecommendRows(data.rows || []);
+      rows = normalizedRows.map((row) => ({
         ...row,
         _search: buildSearchIndex(row),
       }));
+      recipeAdditionLookup = buildRecipeAdditionLookup(data.recipe_additions || []);
+      const summary = data.summary || {};
+      const originalScore = data.original_score ?? summary.original_score;
+      const recommendedScore =
+        data.recommended_score ??
+        summary.healthiest_score ??
+        summary.balanced_score ??
+        summary.cheapest_score;
       if (
-        Number.isFinite(data.original_score) &&
-        Number.isFinite(data.recommended_score)
+        Number.isFinite(originalScore) &&
+        Number.isFinite(recommendedScore)
       ) {
-        overallHeiDelta = data.recommended_score - data.original_score;
+        overallHeiDelta = recommendedScore - originalScore;
       } else {
         overallHeiDelta = null;
       }
       const hasScores =
-        Number.isFinite(data.original_score) &&
-        Number.isFinite(data.recommended_score);
+        Number.isFinite(originalScore) &&
+        Number.isFinite(recommendedScore);
       originalScoreEl.textContent = hasScores
-        ? data.original_score.toFixed(2)
+        ? originalScore.toFixed(2)
         : "-";
       recommendedScoreEl.textContent = hasScores
-        ? data.recommended_score.toFixed(2)
+        ? recommendedScore.toFixed(2)
         : "-";
       summaryEl.hidden = false;
 
@@ -601,6 +757,7 @@ const loadFile = (file) => {
   uploadedFile = file;
   rows = [];
   overallHeiDelta = null;
+  recipeAdditionLookup = {};
   results.innerHTML = "";
   summaryEl.hidden = true;
   componentsEl.hidden = true;
