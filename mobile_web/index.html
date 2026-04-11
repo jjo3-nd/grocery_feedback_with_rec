@@ -7,21 +7,15 @@
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
-    <nav class="top-nav">
-      <div class="top-nav__brand">HEI Optimizer</div>
-      <div class="top-nav__tabs">
-        <button class="top-nav__tab is-active" data-view="list">All items</button>
-        <button class="top-nav__tab" data-view="focus">Focus mode</button>
-      </div>
-    </nav>
-
     <header class="hero">
       <div class="hero__content">
-        <p class="eyebrow">HEI Optimizer</p>
-        <h1>Original products and healthier swaps</h1>
+        <p class="eyebrow">Grocery Feedback</p>
+        <h1 class="hero-title">
+          HEI Optimizer: smarter swaps, healthier baskets
+        </h1>
         <p class="subhead">
-          Upload your <span class="mono">recommended_diet.csv</span> and browse the
-          original items next to their recommended replacements.
+          Upload your <span class="mono">recommended_diet.csv</span> to compare
+          originals with healthier replacements and see your HEI score jump.
         </p>
       </div>
     </header>
@@ -39,6 +33,54 @@
             <p class="muted">Runs the HEI optimizer and returns recommendations.</p>
           </div>
         </div>
+        <div class="cuisine-panel">
+          <div>
+            <h3>Choose a cuisine</h3>
+            <p class="muted">Optional: we’ll nudge recipe suggestions toward your pick.</p>
+          </div>
+          <div class="cuisine-options" role="group" aria-label="Cuisine preference">
+            <label class="cuisine-chip">
+              <input type="checkbox" name="cuisine" value="No preference" checked />
+              <span>No preference</span>
+            </label>
+            <label class="cuisine-chip">
+              <input type="checkbox" name="cuisine" value="Mexican" />
+              <span>Mexican</span>
+            </label>
+            <label class="cuisine-chip">
+              <input type="checkbox" name="cuisine" value="Chinese" />
+              <span>Chinese</span>
+            </label>
+            <label class="cuisine-chip">
+              <input type="checkbox" name="cuisine" value="Korean" />
+              <span>Korean</span>
+            </label>
+            <label class="cuisine-chip">
+              <input type="checkbox" name="cuisine" value="Japanese" />
+              <span>Japanese</span>
+            </label>
+            <label class="cuisine-chip">
+              <input type="checkbox" name="cuisine" value="Thai" />
+              <span>Thai</span>
+            </label>
+            <label class="cuisine-chip">
+              <input type="checkbox" name="cuisine" value="Mediterranean" />
+              <span>Mediterranean</span>
+            </label>
+            <label class="cuisine-chip">
+              <input type="checkbox" name="cuisine" value="Indian" />
+              <span>Indian</span>
+            </label>
+            <label class="cuisine-chip">
+              <input type="checkbox" name="cuisine" value="American" />
+              <span>American</span>
+            </label>
+            <label class="cuisine-chip">
+              <input type="checkbox" name="cuisine" value="African" />
+              <span>African</span>
+            </label>
+          </div>
+        </div>
         <div class="category-panel" id="categoryPanel" hidden>
           <h3>Choose recommendation categories</h3>
           <p class="muted">Pick the category value for each item (derived from Walmart data).</p>
@@ -54,22 +96,13 @@
         </div>
         <div class="summary" id="summary" hidden>
           <div>
-            <p class="summary__label">Original HEI</p>
+            <p class="summary__label">Original score</p>
             <p class="summary__value" id="originalScore">-</p>
           </div>
           <div>
-            <p class="summary__label">Healthiest HEI</p>
-            <p class="summary__value" id="healthiestScore">-</p>
+            <p class="summary__label">Recommended score</p>
+            <p class="summary__value" id="recommendedScore">-</p>
           </div>
-          <div>
-            <p class="summary__label">Cheapest total</p>
-            <p class="summary__value" id="cheapestCost">-</p>
-          </div>
-          <div>
-            <p class="summary__label">Balanced HEI</p>
-            <p class="summary__value" id="balancedScore">-</p>
-          </div>
-          <a id="downloadLink" class="download" href="#" download="recommended_diet.csv">Download CSV</a>
         </div>
         <div class="components" id="components" hidden></div>
         <div class="recipe" id="recipe" hidden>
@@ -90,38 +123,13 @@
       </section>
 
       <section class="results" id="results"></section>
-
-      <section class="focus" id="focusView" hidden>
-        <div class="focus__header">
-          <div>
-            <div class="focus__title" id="focusTitle">Reviewing</div>
-            <div class="focus__subtitle" id="focusSubtitle">Item 1 of 1</div>
-          </div>
-          <div class="focus__progress" id="focusProgress">0%</div>
-        </div>
-        <div class="focus__body" id="focusBody"></div>
-      </section>
     </main>
 
     <footer class="footer">
       <p>Built for quick mobile browsing of HEI recommendations.</p>
     </footer>
 
-    <div class="sticky" id="sticky" hidden>
-      <div>
-        <p class="sticky__label">Cost</p>
-        <div class="sticky__value" id="stickyCost">-</div>
-        <div class="sticky__delta" id="stickyCostDelta"></div>
-      </div>
-      <div>
-        <p class="sticky__label">Total HEI Score</p>
-        <div class="sticky__value" id="stickyHealth">-</div>
-        <div class="sticky__delta" id="stickyHealthDelta"></div>
-      </div>
-      <div class="sticky__components" id="stickyComponents"></div>
-      <div class="sticky__note" id="stickyNote">Live impact</div>
-    </div>
-
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

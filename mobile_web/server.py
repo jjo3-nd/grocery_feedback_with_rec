@@ -361,6 +361,34 @@ def recommend():
     health_full = prep_full(bundles["healthiest"])
     cheap_full = prep_full(bundles["cheapest"])
     balanced_full = prep_full(bundles["balanced"])
+    healthiest_all = bundles["healthiest"].get("best_diet_full")
+
+    recipe_additions = []
+    if isinstance(healthiest_all, pd.DataFrame) and len(healthiest_all) > len(diet_df):
+        additions_df = healthiest_all.iloc[len(diet_df):].copy()
+        for _, add_row in additions_df.iterrows():
+            original_name_raw = str(add_row.get("Original_Product_Name", "")).strip()
+            ingredient_name = (
+                original_name_raw.replace("AI Rec:", "").strip()
+                if original_name_raw.startswith("AI Rec:")
+                else original_name_raw
+            )
+            matched_product = str(add_row.get("Product Name", "")).strip()
+            matched_image = _image_url_map.get(matched_product, "")
+            price_value = add_row.get("Price")
+            matched_price = (
+                float(price_value)
+                if pd.notna(price_value)
+                else None
+            )
+            recipe_additions.append(
+                {
+                    "ingredient_name": ingredient_name,
+                    "matched_product": matched_product,
+                    "matched_price": matched_price,
+                    "matched_image": matched_image,
+                }
+            )
 
     base_cost = diet_df["Price"].sum() if "Price" in diet_df.columns else 0.0
     base_components = extract_hei_components(calculate_hei_scores_wrapper(diet_df))
@@ -442,6 +470,7 @@ def recommend():
             "recommended_components": bundles["healthiest"].get("recommended_components", {}),
             "recipe_info": bundles["healthiest"].get("recipe_info"),
             "recipe_data": bundles["healthiest"].get("recipe_data"),
+            "recipe_additions": recipe_additions,
             "rows": rows,
             "csv": csv_buffer.getvalue(),
         }
