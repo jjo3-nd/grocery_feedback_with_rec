@@ -41,7 +41,9 @@
         </div>
         <div class="category-panel" id="categoryPanel" hidden>
           <h3>Choose recommendation categories</h3>
-          <p class="muted">Pick the category value for each item (derived from Walmart data).</p>
+            <p class="muted">Slide to control how closely each swap matches the original.</p>
+
+            <div class="zone-axis"><span>← Closer to original</span><span>More flexible →</span></div>
           <div id="categoryList" class="category-list"></div>
           <div class="run-actions">
             <button class="run-btn" id="runBtn">Run recommendations</button>
@@ -123,5 +125,22 @@
     </div>
 
     <script src="app.js"></script>
+
+    <script>
+      function applyZone(slider) {
+        const v = parseInt(slider.value), min = parseInt(slider.min||0), max = parseInt(slider.max||3);
+        const zone = Math.min(3, Math.max(0, Math.round(((v-min)/(max-min))*3)));
+        slider.closest('.category-row').dataset.zone = zone;
+      }
+      document.addEventListener('DOMContentLoaded', () => {
+        const wire = root => root.querySelectorAll('.category-row input[type="range"]').forEach(s => {
+          applyZone(s);
+          s.addEventListener('input', () => applyZone(s));
+        });
+        wire(document);
+        const list = document.getElementById('categoryList');
+        if (list) new MutationObserver(() => wire(document)).observe(list, {childList:true, subtree:true});
+      });
+    </script>
   </body>
 </html>

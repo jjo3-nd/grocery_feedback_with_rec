@@ -595,31 +595,62 @@ const buildCategoryOptions = (items) => {
 
     const values = item.values || {};
 
-    const labels = document.createElement("div");
-    labels.className = "slider-labels";
+    // Replaced code
+    const visuals = document.createElement("div");
+    visuals.className = "category-visuals";
+
     SLIDER_ORDER.forEach((col) => {
-      const span = document.createElement("span");
-      span.textContent = values[col] || "—";
-      labels.appendChild(span);
+      const node = document.createElement("div");
+      node.className = "category-node";
+      node.textContent = values[col] || "—";
+      visuals.appendChild(node);
     });
+    // End of replaced code
 
     const slider = document.createElement("input");
+
     slider.type = "range";
     slider.min = 0;
     slider.max = SLIDER_ORDER.length - 1;
-    slider.step = 1;
+    slider.step = 1;  
     slider.value = Number.isFinite(item.default_index) ? item.default_index : 0;
     slider.dataset.index = item.index;
     slider.dataset.values = JSON.stringify(values);
+    
+    // Added code
+    const updateActiveNode = () => {
+      const nodes = visuals.querySelectorAll(".category-node");
 
-    updateSliderLabels(labels, Number(slider.value));
+      nodes.forEach((node, i) => {
+        if (i === Number(slider.value)) {
+          node.classList.add("active");
+        } else {
+          node.classList.remove("active");
+        }
+      });
+    };
 
-    slider.addEventListener("input", () => {
-      updateSliderLabels(labels, Number(slider.value));
-    });
+    slider.addEventListener("input", updateActiveNode);
+
+    updateActiveNode();
+
+    const updateSliderFill = () => {
+      const min = Number(slider.min) || 0;
+      const max = Number(slider.max) || 1;
+      const val = Number(slider.value);
+
+      const percent = ((val - min) / (max - min)) * 100;
+
+      slider.style.background = `linear-gradient(to right, #3b82f6 ${percent}%, #d1d5db ${percent}%)`;
+    };
+
+    slider.addEventListener("input", updateSliderFill);
+    updateSliderFill();
+
+    // End of added code
 
     row.innerHTML = `<strong>${item.product_name}</strong>`;
-    row.appendChild(labels);
+    row.appendChild(visuals); // Change labels to visuals
     row.appendChild(slider);
     categoryList.appendChild(row);
   });
